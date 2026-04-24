@@ -549,7 +549,8 @@ async function fetchSubscriptionUserInfo(urls: string[]): Promise<string> {
 
   const results = await Promise.allSettled(urls.map(url => {
     const cleanUrl = url.replace(/\s*\|.*$/, '').trim();
-    return fetch(cleanUrl, { method: 'HEAD', headers: { 'User-Agent': 'clash.meta' } });
+    // 使用 GET 请求，因为部分机场面板不支持 HEAD 请求或者 HEAD 不返回自定义 Header
+    return fetch(cleanUrl, { method: 'GET', headers: { 'User-Agent': 'Clash/1.8.0' } });
   }));
 
   for (const res of results) {
@@ -557,10 +558,10 @@ async function fetchSubscriptionUserInfo(urls: string[]): Promise<string> {
       const info = res.value.headers.get('subscription-userinfo') || res.value.headers.get('Subscription-Userinfo');
       if (info) {
         foundInfo = true;
-        const matchUp = info.match(/upload=(\d+)/i);
-        const matchDown = info.match(/download=(\d+)/i);
-        const matchTotal = info.match(/total=(\d+)/i);
-        const matchExpire = info.match(/expire=(\d+)/i);
+        const matchUp = info.match(/upload\s*=\s*(\d+)/i);
+        const matchDown = info.match(/download\s*=\s*(\d+)/i);
+        const matchTotal = info.match(/total\s*=\s*(\d+)/i);
+        const matchExpire = info.match(/expire\s*=\s*(\d+)/i);
 
         if (matchUp) upload += parseInt(matchUp[1], 10);
         if (matchDown) download += parseInt(matchDown[1], 10);
