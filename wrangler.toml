@@ -9,7 +9,7 @@ not_found_handling = "single-page-application"
 run_worker_first = true
 
 [build]
-command = "npm run build"
+command = "npm run deploy"
 
 # wrangler v4 自动 provisioning：首次 deploy 时自动创建 KV namespace 并写入 id
 [[kv_namespaces]]

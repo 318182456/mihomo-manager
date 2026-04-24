@@ -1,82 +1,50 @@
-// api.ts — 前端与 Worker API 的通信层
+import {
+  startRegistration,
+  startAuthentication,
+} from '@simplewebauthn/browser';
+
+// ---------- 类型 ----------
 
 export interface SubscriptionGroup {
-  id: string;
-  title: string;
-  enabled: boolean;
-  filter: string;
-  urls: string[];
-  updatedAt: string;
+  id: string; title: string; enabled: boolean; filter: string; urls: string[]; updatedAt: string;
 }
-
 export interface Template {
-  id: string;
-  name: string;
-  content: string;
-  updatedAt: string;
+  id: string; name: string; content: string; updatedAt: string;
 }
-
 export interface GeneratedLink {
-  id: string;
-  name: string;
-  group: string;
-  templateId: string;
-  subscriptionGroupId: string;
-  token: string;
-  expiresAt: string | null;
-  createdAt: string;
+  id: string; name: string; group: string; templateId: string;
+  subscriptionGroupId: string; token: string; expiresAt: string | null; createdAt: string;
 }
-
 export interface DashboardStats {
-  activeSubscriptions: number;
-  totalSubscriptions: number;
-  activeLinks: number;
-  totalLinks: number;
-  templateCount: number;
-  kvUsageKB: number;
+  activeSubscriptions: number; totalSubscriptions: number;
+  activeLinks: number; totalLinks: number; templateCount: number; kvUsageKB: number;
+}
+export interface PasskeyItem {
+  id: string; name: string; createdAt: string;
 }
 
-// ---------- token 本地持久化 ----------
+// ---------- Token 持久化 ----------
 
 const TOKEN_KEY = 'mihomo_token';
-
-export function getToken(): string | null {
-  return localStorage.getItem(TOKEN_KEY);
-}
-
-export function setToken(token: string): void {
-  localStorage.setItem(TOKEN_KEY, token);
-}
-
-export function clearToken(): void {
-  localStorage.removeItem(TOKEN_KEY);
-}
+export const getToken   = () => localStorage.getItem(TOKEN_KEY);
+export const setToken   = (t: string) => localStorage.setItem(TOKEN_KEY, t);
+export const clearToken = () => localStorage.removeItem(TOKEN_KEY);
 
 // ---------- 基础请求 ----------
 
-const BASE = import.meta.env.DEV ? '' : '';
-
-async function apiFetch<T>(
-  path: string,
-  options: RequestInit = {},
-): Promise<T> {
+async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
   const token = getToken();
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     ...(options.headers as Record<string, string>),
   };
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
-  }
+  if (token) headers['Authorization'] = `Bearer ${token}`;
 
-  const res = await fetch(`${BASE}${path}`, { ...options, headers });
-  if (res.status === 401) {
-    clearToken();
-    throw new Error('认证失败，请重新登录');
-  }
+  const res = await fetch(path, { ...options, headers });
+  if (res.status === 401) { clearToken(); throw new Error('认证失败，请重新登录'); }
   if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error((err as { error: string }).error || res.statusText);
+    const body = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error((body as { error: string }).error || res.statusText);
   }
   return res.json() as Promise<T>;
 }
@@ -85,9 +53,57 @@ async function apiFetch<T>(
 
 export async function login(password: string): Promise<string> {
   const data = await apiFetch<{ token: string }>('/api/auth/login', {
-    method: 'POST',
-    body: JSON.stringify({ password }),
+    method: 'POST', body: JSON.stringify({ password }),
   });
+  setToken(data.token);
+  return data.token;
+}
+
+/** Passkey 是否已注册 */
+export async function getPasskeyStatus(): Promise<number> {
+  const data = await apiFetch<{ count: number }>('/api/auth/passkey/status');
+  return data.count;
+}
+
+/** 获取已注册 Passkey 列表（需鉴权） */
+export async function getPasskeyList(): Promise<PasskeyItem[]> {
+  return apiFetch<PasskeyItem[]>('/api/auth/passkey/list');
+}
+
+/** 删除指定 Passkey */
+export async function deletePasskey(id: string): Promise<void> {
+  await apiFetch(`/api/auth/passkey/delete/${id}`, { method: 'DELETE' });
+}
+
+/** 注册新 Passkey（需已登录） */
+export async function registerPasskey(): Promise<string> {
+  // 1. 获取注册选项
+  const options = await apiFetch<Parameters<typeof startRegistration>[0]>(
+    '/api/auth/passkey/register/begin', { method: 'POST' }
+  );
+  // 2. 调用浏览器 WebAuthn API
+  const response = await startRegistration({ optionsJSON: options });
+  // 3. 服务端验证
+  const result = await apiFetch<{ ok: boolean; name: string }>(
+    '/api/auth/passkey/register/finish',
+    { method: 'POST', body: JSON.stringify(response) }
+  );
+  return result.name;
+}
+
+/** Passkey 登录 */
+export async function loginWithPasskey(): Promise<string> {
+  // 1. 获取认证选项
+  const options = await apiFetch<Parameters<typeof startAuthentication>[0]>(
+    '/api/auth/passkey/login/begin', { method: 'POST' }
+  );
+  // 2. 调用浏览器 WebAuthn API（自动弹出系统对话框）
+  const response = await startAuthentication({ optionsJSON: options });
+  // 3. 服务端验证
+  const data = await apiFetch<{ token: string }>(
+    '/api/auth/passkey/login/finish',
+    { method: 'POST', body: JSON.stringify(response) }
+  );
   setToken(data.token);
   return data.token;
 }
@@ -100,81 +116,31 @@ export async function getDashboard(): Promise<DashboardStats> {
 
 // ---------- Subscriptions ----------
 
-export async function getSubscriptions(): Promise<SubscriptionGroup[]> {
-  return apiFetch<SubscriptionGroup[]>('/api/subscriptions');
-}
-
-export async function createSubscription(
-  data: Omit<SubscriptionGroup, 'id' | 'updatedAt'>,
-): Promise<SubscriptionGroup> {
-  return apiFetch<SubscriptionGroup>('/api/subscriptions', {
-    method: 'POST',
-    body: JSON.stringify(data),
-  });
-}
-
-export async function updateSubscription(
-  id: string,
-  data: Partial<SubscriptionGroup>,
-): Promise<SubscriptionGroup> {
-  return apiFetch<SubscriptionGroup>(`/api/subscriptions/${id}`, {
-    method: 'PUT',
-    body: JSON.stringify(data),
-  });
-}
-
-export async function deleteSubscription(id: string): Promise<void> {
-  await apiFetch(`/api/subscriptions/${id}`, { method: 'DELETE' });
-}
+export const getSubscriptions = () => apiFetch<SubscriptionGroup[]>('/api/subscriptions');
+export const createSubscription = (d: Omit<SubscriptionGroup,'id'|'updatedAt'>) =>
+  apiFetch<SubscriptionGroup>('/api/subscriptions', { method:'POST', body: JSON.stringify(d) });
+export const updateSubscription = (id: string, d: Partial<SubscriptionGroup>) =>
+  apiFetch<SubscriptionGroup>(`/api/subscriptions/${id}`, { method:'PUT', body: JSON.stringify(d) });
+export const deleteSubscription = (id: string) =>
+  apiFetch(`/api/subscriptions/${id}`, { method:'DELETE' });
 
 // ---------- Templates ----------
 
-export async function getTemplates(): Promise<Template[]> {
-  return apiFetch<Template[]>('/api/templates');
-}
-
-export async function createTemplate(data: { name: string; content: string }): Promise<Template> {
-  return apiFetch<Template>('/api/templates', {
-    method: 'POST',
-    body: JSON.stringify(data),
-  });
-}
-
-export async function updateTemplate(id: string, data: Partial<Template>): Promise<Template> {
-  return apiFetch<Template>(`/api/templates/${id}`, {
-    method: 'PUT',
-    body: JSON.stringify(data),
-  });
-}
-
-export async function deleteTemplate(id: string): Promise<void> {
-  await apiFetch(`/api/templates/${id}`, { method: 'DELETE' });
-}
+export const getTemplates = () => apiFetch<Template[]>('/api/templates');
+export const createTemplate = (d: { name: string; content: string }) =>
+  apiFetch<Template>('/api/templates', { method:'POST', body: JSON.stringify(d) });
+export const updateTemplate = (id: string, d: Partial<Template>) =>
+  apiFetch<Template>(`/api/templates/${id}`, { method:'PUT', body: JSON.stringify(d) });
+export const deleteTemplate = (id: string) =>
+  apiFetch(`/api/templates/${id}`, { method:'DELETE' });
 
 // ---------- Links ----------
 
-export async function getLinks(): Promise<GeneratedLink[]> {
-  return apiFetch<GeneratedLink[]>('/api/links');
-}
+export const getLinks = () => apiFetch<GeneratedLink[]>('/api/links');
+export const createLink = (d: Omit<GeneratedLink,'id'|'token'|'createdAt'>) =>
+  apiFetch<GeneratedLink>('/api/links', { method:'POST', body: JSON.stringify(d) });
+export const deleteLink = (id: string) =>
+  apiFetch(`/api/links/${id}`, { method:'DELETE' });
 
-export async function createLink(data: {
-  name: string;
-  group: string;
-  templateId: string;
-  subscriptionGroupId: string;
-  expiresAt: string | null;
-}): Promise<GeneratedLink> {
-  return apiFetch<GeneratedLink>('/api/links', {
-    method: 'POST',
-    body: JSON.stringify(data),
-  });
-}
-
-export async function deleteLink(id: string): Promise<void> {
-  await apiFetch(`/api/links/${id}`, { method: 'DELETE' });
-}
-
-/** 构造订阅下发 URL */
-export function buildSubUrl(token: string): string {
-  return `${window.location.origin}/sub/${token}`;
-}
+export const buildSubUrl = (token: string) =>
+  `${window.location.origin}/sub/${token}`;
