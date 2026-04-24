@@ -536,6 +536,51 @@ async function handleDashboard(env: Env): Promise<Response> {
 
 // ---------- 订阅内容下发 ----------
 
+async function fetchSubscriptionUserInfo(urls: string[]): Promise<string> {
+  if (urls.length === 0) {
+    return 'upload=0; download=0; total=107374182400; expire=0';
+  }
+
+  let upload = 0;
+  let download = 0;
+  let total = 0;
+  let expire = 0;
+  let foundInfo = false;
+
+  const results = await Promise.allSettled(urls.map(url => {
+    const cleanUrl = url.replace(/\s*\|.*$/, '').trim();
+    return fetch(cleanUrl, { method: 'HEAD', headers: { 'User-Agent': 'clash.meta' } });
+  }));
+
+  for (const res of results) {
+    if (res.status === 'fulfilled' && res.value.ok) {
+      const info = res.value.headers.get('subscription-userinfo') || res.value.headers.get('Subscription-Userinfo');
+      if (info) {
+        foundInfo = true;
+        const matchUp = info.match(/upload=(\d+)/i);
+        const matchDown = info.match(/download=(\d+)/i);
+        const matchTotal = info.match(/total=(\d+)/i);
+        const matchExpire = info.match(/expire=(\d+)/i);
+
+        if (matchUp) upload += parseInt(matchUp[1], 10);
+        if (matchDown) download += parseInt(matchDown[1], 10);
+        if (matchTotal) total += parseInt(matchTotal[1], 10);
+        if (matchExpire) {
+          const exp = parseInt(matchExpire[1], 10);
+          if (exp > 0 && (expire === 0 || exp < expire)) {
+            expire = exp;
+          }
+        }
+      }
+    }
+  }
+
+  if (!foundInfo) {
+    return 'upload=0; download=0; total=107374182400; expire=0';
+  }
+  return `upload=${upload}; download=${download}; total=${total}; expire=${expire}`;
+}
+
 async function handleSubFetch(pathname: string, env: Env, request: Request): Promise<Response> {
   const token = pathname.replace(/^\/sub\//, '').split('/')[0];
   if (!token) return err404();
@@ -554,20 +599,26 @@ async function handleSubFetch(pathname: string, env: Env, request: Request): Pro
   const tplObj = await env.ATTACHMENTS.get(link.templateId);
   const tpl: Template|null = tplObj ? JSON.parse(await tplObj.text()) : null;
 
+  // 获取汇总的远端订阅流量信息
+  const userInfo = await fetchSubscriptionUserInfo(group.urls);
+
   // 若无模板：降级为合并上游内容（兼容旧行为）
   if (!tpl) {
     const results = await Promise.allSettled(
-      group.urls.map(url=>fetch(url,{headers:{'User-Agent':'clash-verge/1.0'}}).then(r=>r.text()))
+      group.urls.map(url=>{
+        const cleanUrl = url.replace(/\s*\|.*$/, '').trim();
+        return fetch(cleanUrl,{headers:{'User-Agent':'clash.meta'}}).then(r=>r.text());
+      })
     );
     const content = results
       .filter((r): r is PromiseFulfilledResult<string> => r.status==='fulfilled')
       .map(r=>r.value).join('\n');
-    return subResponse(content, link.name);
+    return subResponse(content, link.name, userInfo);
   }
 
   // 模板渲染：将订阅组 URL 注入模板
   const output = await renderTemplate(tpl.content, group, env);
-  return subResponse(output, link.name);
+  return subResponse(output, link.name, userInfo);
 }
 
 /**
@@ -626,6 +677,7 @@ async function renderTemplate(template: string, group: SubscriptionGroup, env: E
       return [
         `  ${name}:`,
         `    url: "${cleanUrl}"`,
+        `    path: "./providers/${name}.yaml"`,
         `    <<: *p`,
       ].join('\n');
     }).join('\n');
@@ -652,12 +704,13 @@ async function renderTemplate(template: string, group: SubscriptionGroup, env: E
   return output;
 }
 
-function subResponse(content: string, name: string): Response {
+function subResponse(content: string, name: string, userInfo: string): Response {
+  const encodedName = encodeURIComponent(name);
   return new Response(content, {
     headers: {
       'Content-Type': 'text/plain; charset=utf-8',
-      'Content-Disposition': `attachment; filename="${name}.yaml"`,
-      'Subscription-Userinfo': 'upload=0; download=0; total=107374182400; expire=0',
+      'Content-Disposition': `attachment; filename="profile.yaml"; filename*=utf-8''${encodedName}.yaml`,
+      'Subscription-Userinfo': userInfo,
       ...CORS,
     },
   });
