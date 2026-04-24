@@ -14,3 +14,7 @@ command = "npm run deploy"
 # wrangler v4 自动 provisioning：首次 deploy 时自动创建 KV namespace 并写入 id
 [[kv_namespaces]]
 binding = "KV"
+
+[[r2_buckets]]
+binding = "ATTACHMENTS"
+bucket_name = "mihomo-attachments"

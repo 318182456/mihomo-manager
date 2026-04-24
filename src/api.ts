@@ -81,8 +81,8 @@ export async function registerPasskey(): Promise<string> {
   const options = await apiFetch<Parameters<typeof startRegistration>[0]>(
     '/api/auth/passkey/register/begin', { method: 'POST' }
   );
-  // 2. 调用浏览器 WebAuthn API
-  const response = await startRegistration({ optionsJSON: options });
+  // @simplewebauthn/browser v10: startRegistration(options) directly
+  const response = await startRegistration(options as any);
   // 3. 服务端验证
   const result = await apiFetch<{ ok: boolean; name: string }>(
     '/api/auth/passkey/register/finish',
@@ -97,8 +97,8 @@ export async function loginWithPasskey(): Promise<string> {
   const options = await apiFetch<Parameters<typeof startAuthentication>[0]>(
     '/api/auth/passkey/login/begin', { method: 'POST' }
   );
-  // 2. 调用浏览器 WebAuthn API（自动弹出系统对话框）
-  const response = await startAuthentication({ optionsJSON: options });
+  // @simplewebauthn/browser v10: startAuthentication(options) directly
+  const response = await startAuthentication(options as any);
   // 3. 服务端验证
   const data = await apiFetch<{ token: string }>(
     '/api/auth/passkey/login/finish',

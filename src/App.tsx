@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import type { FormEvent } from 'react';
 import {
   LayoutDashboard,
   Rss,
@@ -222,7 +223,7 @@ function LoginView({ onLogin }: { onLogin: () => void }) {
     api.getPasskeyStatus().then(setPasskeyCount).catch(() => {});
   }, []);
 
-  const handlePassword = async (e: React.FormEvent) => {
+  const handlePassword = async (e: FormEvent) => {
     e.preventDefault();
     setError('');
     setLoading(true);
@@ -759,7 +760,7 @@ function GeneratedLinksView() {
 
   useEffect(() => { loadData(); }, []);
 
-  const handleCreate = async (e: React.FormEvent) => {
+  const handleCreate = async (e: FormEvent) => {
     e.preventDefault();
     if (!formName || !formSubGroupId || !formTplId) return alert('请完整填写');
     try {
