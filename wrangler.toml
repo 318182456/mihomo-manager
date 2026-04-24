@@ -13,4 +13,4 @@ command = "npm run build"
 
 # wrangler v4 自动 provisioning：首次 deploy 时自动创建 KV namespace 并写入 id
 [[kv_namespaces]]
-binding = "MIHOMO_KV"
+binding = "KV"
