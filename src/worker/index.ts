@@ -865,10 +865,32 @@ async function renderTemplate(template: string, group: SubscriptionGroup, env: E
   // {{URL_ALL}} → 所有 URL 以换行分隔
   output = output.replace(/\{\{URL_ALL\}\}/g, group.urls.map(e => e.url).join('\n'));
 
+  // 编译高级过滤正则
+  let compiledFilter = group.filter || '';
+  if (compiledFilter.startsWith('{"advanced":true')) {
+    try {
+      const data = JSON.parse(compiledFilter);
+      const rules = data.rules || [];
+      const orIncludes = rules.filter((r: any) => r.logic === 'or').map((r: any) => r.value).filter(Boolean);
+      const andIncludes = rules.filter((r: any) => r.logic === 'and').map((r: any) => r.value).filter(Boolean);
+      const notExcludes = rules.filter((r: any) => r.logic === 'not').map((r: any) => r.value).filter(Boolean);
+      
+      let regex = '^';
+      if (orIncludes.length > 0) regex += `(?=.*(${orIncludes.join('|')}))`;
+      for (const andInc of andIncludes) regex += `(?=.*${andInc})`;
+      if (notExcludes.length > 0) regex += `(?!.*(${notExcludes.join('|')}))`;
+      regex += '.*$';
+      
+      compiledFilter = regex === '^.*$' ? '' : regex;
+    } catch {
+      // 解析失败则使用原始字符串
+    }
+  }
+
   // 通用变量
   output = output
     .replace(/\{\{GROUP_NAME\}\}/g,    group.title)
-    .replace(/\{\{GROUP_FILTER\}\}/g,  group.filter || '')
+    .replace(/\{\{GROUP_FILTER\}\}/g,  compiledFilter)
     .replace(/\{\{GENERATED_AT\}\}/g,  new Date().toISOString());
 
   return output;

@@ -33,6 +33,7 @@ import {
   ChevronDown,
   Clock,
   AlertTriangle,
+  Settings2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import * as api from './api';
@@ -437,6 +438,30 @@ function SubscriptionsView() {
 
   const urlKey = (gid: string, i: number) => `${gid}-${i}`;
 
+  const compileFilter = (filterStr: string): string => {
+    let compiledFilter = filterStr || '';
+    if (compiledFilter.startsWith('{"advanced":true')) {
+      try {
+        const data = JSON.parse(compiledFilter);
+        const rules = data.rules || [];
+        const orIncludes = rules.filter((r: any) => r.logic === 'or').map((r: any) => r.value).filter(Boolean);
+        const andIncludes = rules.filter((r: any) => r.logic === 'and').map((r: any) => r.value).filter(Boolean);
+        const notExcludes = rules.filter((r: any) => r.logic === 'not').map((r: any) => r.value).filter(Boolean);
+        
+        let regex = '^';
+        if (orIncludes.length > 0) regex += `(?=.*(${orIncludes.join('|')}))`;
+        for (const andInc of andIncludes) regex += `(?=.*${andInc})`;
+        if (notExcludes.length > 0) regex += `(?!.*(${notExcludes.join('|')}))`;
+        regex += '.*$';
+        
+        compiledFilter = regex === '^.*$' ? '' : regex;
+      } catch {
+        // do nothing
+      }
+    }
+    return compiledFilter;
+  };
+
   const loadData = async () => {
     try { setGroups(await api.getSubscriptions()); }
     catch (e) { console.error(e); }
@@ -534,16 +559,91 @@ function SubscriptionsView() {
 
             {/* 筛选正则 */}
             <div className="px-4 py-3 border-b border-technical-border/50 flex flex-col gap-3">
-              <div className="flex items-center gap-3">
-                <div className="flex items-center gap-2 text-technical-muted font-display text-[10px] uppercase tracking-widest whitespace-nowrap shrink-0">
+              <div className="flex items-start sm:items-center gap-3">
+                <div className="flex items-center gap-2 text-technical-muted font-display text-[10px] uppercase tracking-widest whitespace-nowrap shrink-0 mt-2 sm:mt-0">
                   <Filter size={13} /><span>筛选:</span>
+                  <button 
+                    onClick={() => {
+                      const isAdv = group.filter?.startsWith('{"advanced":true');
+                      if (isAdv) {
+                        handleUpdateGroup(group.id, { filter: '' });
+                      } else {
+                        handleUpdateGroup(group.id, { filter: JSON.stringify({ advanced: true, rules: [] }) });
+                      }
+                    }}
+                    className={`ml-1 hover:text-technical-cyan transition-colors ${group.filter?.startsWith('{"advanced":true') ? 'text-technical-cyan' : ''}`}
+                    title="切换高级模式 (AND/OR/NOT)"
+                  >
+                    <Settings2 size={13} />
+                  </button>
                 </div>
-                <input type="text" value={group.filter}
-                  onChange={(e) => setGroups(groups.map(g => g.id === group.id ? { ...g, filter: e.target.value } : g))}
-                  onBlur={(e) => handleUpdateGroup(group.id, { filter: e.target.value })}
-                  placeholder="留空则不筛选"
-                  className="flex-1 bg-black/40 border border-technical-border rounded-sm px-3 py-1 font-mono text-xs text-technical-cyan focus:outline-none focus:border-technical-cyan/30 transition-all"
-                />
+                {group.filter?.startsWith('{"advanced":true') ? (
+                  <div className="flex-1 min-w-0">
+                    {(() => {
+                      let rules: any[] = [];
+                      try { rules = JSON.parse(group.filter).rules || []; } catch {}
+                      
+                      const updateRules = (newRules: any[]) => {
+                        const newFilter = JSON.stringify({ advanced: true, rules: newRules });
+                        setGroups(groups.map(g => g.id === group.id ? { ...g, filter: newFilter } : g));
+                        handleUpdateGroup(group.id, { filter: newFilter });
+                      };
+
+                      return (
+                        <div className="flex flex-col gap-2 bg-black/40 border border-technical-border rounded-sm p-2 w-full overflow-hidden">
+                          {rules.map((rule, rIdx) => (
+                            <div key={rIdx} className="flex flex-col sm:flex-row sm:items-center gap-2 group/rule">
+                              <select 
+                                value={rule.logic}
+                                onChange={(e) => {
+                                  const n = [...rules];
+                                  n[rIdx].logic = e.target.value;
+                                  updateRules(n);
+                                }}
+                                className="bg-zinc-900 border border-technical-border text-[11px] text-technical-muted px-1.5 py-1 outline-none rounded-sm shrink-0"
+                              >
+                                <option value="or">包含 (OR)</option>
+                                <option value="and">必含 (AND)</option>
+                                <option value="not">排除 (NOT)</option>
+                              </select>
+                              <input 
+                                type="text"
+                                value={rule.value}
+                                onChange={(e) => {
+                                  const n = [...rules];
+                                  n[rIdx].value = e.target.value;
+                                  setGroups(groups.map(g => g.id === group.id ? { ...g, filter: JSON.stringify({ advanced: true, rules: n }) } : g));
+                                }}
+                                onBlur={() => {
+                                  const n = [...rules];
+                                  updateRules(n);
+                                }}
+                                placeholder="正则关键词..."
+                                className="flex-1 min-w-0 bg-zinc-900 border border-technical-border/50 text-xs font-mono text-technical-cyan px-2 py-1 outline-none focus:border-technical-cyan/50 rounded-sm"
+                              />
+                              <button onClick={() => updateRules(rules.filter((_, i) => i !== rIdx))} className="text-red-500/50 hover:text-red-500 shrink-0 sm:opacity-0 group-hover/rule:opacity-100 transition-opacity">
+                                <Trash2 size={13} />
+                              </button>
+                            </div>
+                          ))}
+                          <button 
+                            onClick={() => updateRules([...rules, { logic: 'or', value: '' }])}
+                            className="text-[10px] text-technical-cyan/70 hover:text-technical-cyan hover:bg-technical-cyan/10 self-start px-2 py-1 rounded transition-colors flex items-center gap-1"
+                          >
+                            <Plus size={12} /> 添加规则
+                          </button>
+                        </div>
+                      );
+                    })()}
+                  </div>
+                ) : (
+                  <input type="text" value={group.filter}
+                    onChange={(e) => setGroups(groups.map(g => g.id === group.id ? { ...g, filter: e.target.value } : g))}
+                    onBlur={(e) => handleUpdateGroup(group.id, { filter: e.target.value })}
+                    placeholder="留空则不筛选"
+                    className="flex-1 bg-black/40 border border-technical-border rounded-sm px-3 py-1 font-mono text-xs text-technical-cyan focus:outline-none focus:border-technical-cyan/30 transition-all"
+                  />
+                )}
                 <button
                   onClick={() => handleFetchProxies(group.id)}
                   disabled={loadingProxies[group.id]}
@@ -559,7 +659,10 @@ function SubscriptionsView() {
                     <span>总计 {proxyCache[group.id].length} 个节点</span>
                     <span>
                       已过滤出 {proxyCache[group.id].filter(p => {
-                        try { return !group.filter || new RegExp(group.filter).test(p); }
+                        try { 
+                          const pattern = compileFilter(group.filter);
+                          return !pattern || new RegExp(pattern).test(p); 
+                        }
                         catch { return false; }
                       }).length} 个
                     </span>
@@ -568,7 +671,8 @@ function SubscriptionsView() {
                     {proxyCache[group.id].map((p, idx) => {
                       let isMatch = true;
                       try {
-                        isMatch = !group.filter || new RegExp(group.filter).test(p);
+                        const pattern = compileFilter(group.filter);
+                        isMatch = !pattern || new RegExp(pattern).test(p);
                       } catch {
                         isMatch = false;
                       }
