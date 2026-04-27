@@ -148,7 +148,7 @@ export default function App() {
           </div>
         </header>
 
-        <main className="flex-1 flex flex-col relative w-full h-full overflow-hidden bg-technical-bg">
+        <main className="flex-1 flex flex-col overflow-hidden bg-technical-bg">
           <AnimatePresence mode="wait">
             <motion.div
               key={currentView}
@@ -156,7 +156,7 @@ export default function App() {
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -10 }}
               transition={{ duration: 0.2 }}
-              className="absolute inset-0 flex flex-col overflow-y-auto"
+              className="flex-1 flex flex-col w-full overflow-y-auto"
             >
               {renderView()}
             </motion.div>
