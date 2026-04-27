@@ -148,7 +148,7 @@ export default function App() {
           </div>
         </header>
 
-        <main className="flex-1 flex flex-col overflow-y-auto bg-technical-bg relative">
+        <main className="flex-1 bg-technical-bg relative">
           <AnimatePresence mode="wait">
             <motion.div
               key={currentView}
@@ -156,7 +156,7 @@ export default function App() {
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -10 }}
               transition={{ duration: 0.2 }}
-              className="flex-1 flex flex-col min-h-full"
+              className="absolute inset-0 flex flex-col overflow-y-auto"
             >
               {renderView()}
             </motion.div>
@@ -369,7 +369,7 @@ function DashboardView() {
   ];
 
   return (
-    <div className="p-6 md:p-10 space-y-8 max-w-7xl mx-auto">
+    <div className="p-6 md:p-10 space-y-8 w-full max-w-[1600px] mx-auto">
       <div className="flex flex-col md:flex-row md:items-end justify-between border-b border-technical-border pb-6 gap-4">
         <div>
           <h2 className="text-2xl font-display font-bold text-white">控制面板</h2>
@@ -478,7 +478,7 @@ function SubscriptionsView() {
   if (loading) return <div className="p-10 text-technical-muted font-mono">Loading...</div>;
 
   return (
-    <div className="p-6 md:p-10 space-y-8 max-w-5xl mx-auto">
+    <div className="p-6 md:p-10 space-y-8 w-full max-w-[1600px] mx-auto">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-end border-b border-technical-border pb-6 gap-6">
         <div>
           <h2 className="text-2xl font-display font-bold text-white">订阅源</h2>
@@ -866,7 +866,7 @@ function GeneratedLinksView() {
   if (loading) return <div className="p-10 text-technical-muted font-mono">Loading...</div>;
 
   return (
-    <div className="p-6 md:p-10 space-y-8 max-w-6xl mx-auto">
+    <div className="p-6 md:p-10 space-y-8 w-full max-w-[1600px] mx-auto">
        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-end border-b border-technical-border pb-6 gap-6">
         <div>
           <h2 className="text-2xl font-display font-bold text-white">已生成链接</h2>
@@ -1014,8 +1014,8 @@ function PasskeyAdminView() {
   };
 
   return (
-    <div className="p-6 md:p-10 space-y-8 max-w-3xl mx-auto">
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-end border-b border-technical-border pb-6 gap-4">
+    <div className="p-6 md:p-10 space-y-8 max-w-6xl mx-auto">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-end border-b border-technical-border pb-6 gap-6">
         <div>
           <h2 className="text-2xl font-display font-bold text-white">Passkey 管理</h2>
           <p className="text-sm text-technical-muted mt-1">管理 WebAuthn 无密码登录设备。</p>
