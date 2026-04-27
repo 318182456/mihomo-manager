@@ -755,6 +755,64 @@ async function fetchSubscriptionUserInfo(entries: UrlEntry[]): Promise<string> {
   return `upload=${upload}; download=${download}; total=${total}; expire=${expire}`;
 }
 
+/** 将 filter 字段（普通正则或高级 JSON）编译为正则字符串，空字符串表示不过滤 */
+function compileGroupFilter(filter: string): string {
+  if (!filter) return '';
+  if (!filter.startsWith('{"advanced":true')) return filter;
+  try {
+    const data = JSON.parse(filter);
+    const rules = data.rules || [];
+    const orIncludes = rules.filter((r: any) => r.logic === 'or').map((r: any) => r.value).filter(Boolean);
+    const andIncludes = rules.filter((r: any) => r.logic === 'and').map((r: any) => r.value).filter(Boolean);
+    const notExcludes = rules.filter((r: any) => r.logic === 'not').map((r: any) => r.value).filter(Boolean);
+    let regex = '^';
+    if (orIncludes.length > 0) regex += `(?=.*(${orIncludes.join('|')}))`;
+    for (const andInc of andIncludes) regex += `(?=.*${andInc})`;
+    if (notExcludes.length > 0) regex += `(?!.*(${notExcludes.join('|')}))`;
+    regex += '.*$';
+    return regex === '^.*$' ? '' : regex;
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * 拉取订阅 URL 并返回过滤后的 proxies 数组 + 原始 YAML 列表
+ * 若存在 filter 则按正则过滤代理名称
+ */
+async function fetchProxiesFromGroup(
+  group: SubscriptionGroup
+): Promise<{ proxies: any[]; rawYamls: string[] }> {
+  const filter = compileGroupFilter(group.filter);
+  const filterRe = filter ? new RegExp(filter) : null;
+
+  const results = await Promise.allSettled(
+    group.urls.map(entry =>
+      fetch(entry.url.trim(), { headers: { 'User-Agent': 'clash.meta' } }).then(r => r.text())
+    )
+  );
+
+  const rawYamls: string[] = [];
+  const proxies: any[] = [];
+
+  for (const res of results) {
+    if (res.status !== 'fulfilled' || !res.value) continue;
+    rawYamls.push(res.value);
+    try {
+      const parsed = jsyaml.load(res.value) as any;
+      if (parsed && Array.isArray(parsed.proxies)) {
+        for (const p of parsed.proxies) {
+          if (!p || !p.name) continue;
+          if (filterRe && !filterRe.test(p.name)) continue;
+          proxies.push(p);
+        }
+      }
+    } catch { /* 忽略解析错误，回退到原始拼接 */ }
+  }
+
+  return { proxies, rawYamls };
+}
+
 async function handleSubFetch(pathname: string, env: Env, request: Request): Promise<Response> {
   const token = pathname.replace(/^\/sub\//, '').split('/')[0];
   if (!token) return err404();
@@ -770,7 +828,6 @@ async function handleSubFetch(pathname: string, env: Env, request: Request): Pro
   const rawGroup = groups.find(g=>g.id===link.subscriptionGroupId);
   if (!rawGroup || !rawGroup.enabled) return err('订阅组不存在或已禁用', 404);
 
-  // 将 urls 规范化为 UrlEntry[]
   const group: SubscriptionGroup = { ...rawGroup, urls: normalizeUrls(rawGroup.urls ?? []) };
 
   const tplObj = await env.ATTACHMENTS.get(link.templateId);
@@ -778,19 +835,25 @@ async function handleSubFetch(pathname: string, env: Env, request: Request): Pro
 
   const userInfo = await fetchSubscriptionUserInfo(group.urls);
 
+  // 拉取并过滤代理节点
+  const { proxies, rawYamls } = await fetchProxiesFromGroup(group);
+
   if (!tpl) {
-    const results = await Promise.allSettled(
-      group.urls.map(entry =>
-        fetch(entry.url.trim(), {headers:{'User-Agent':'clash.meta'}}).then(r=>r.text())
-      )
-    );
-    const content = results
-      .filter((r): r is PromiseFulfilledResult<string> => r.status==='fulfilled')
-      .map(r=>r.value).join('\n');
-    return subResponse(content, link.name, userInfo);
+    // 无模板时：若能解析到 proxies 则重新序列化过滤结果，否则直接拼接原始内容
+    if (proxies.length > 0) {
+      // 取第一份 YAML 作为基础结构，替换其中的 proxies
+      try {
+        const base = jsyaml.load(rawYamls[0]) as any;
+        if (base && Array.isArray(base.proxies)) {
+          base.proxies = proxies;
+          return subResponse(jsyaml.dump(base, { lineWidth: -1 }), link.name, userInfo);
+        }
+      } catch { /* 失败回退 */ }
+    }
+    return subResponse(rawYamls.join('\n'), link.name, userInfo);
   }
 
-  const output = await renderTemplate(tpl.content, group, env);
+  const output = await renderTemplate(tpl.content, group, proxies, env);
   return subResponse(output, link.name, userInfo);
 }
 
@@ -818,7 +881,7 @@ async function handleSubFetch(pathname: string, env: Env, request: Request): Pro
  * 4. 包含其他模板：
  *    {{INCLUDE: 模板名称}} → 会被替换为对应的子模板内容
  */
-async function renderTemplate(template: string, group: SubscriptionGroup, env: Env): Promise<string> {
+async function renderTemplate(template: string, group: SubscriptionGroup, filteredProxies: any[], env: Env): Promise<string> {
   let output = template;
 
   // 1. 获取所有模板用于 INCLUDE 替换 (利用自动 seed 获取完整列表)
@@ -857,6 +920,22 @@ async function renderTemplate(template: string, group: SubscriptionGroup, env: E
       .replace(/\{\{PROVIDERS\}\}/g, providerLines);
   }
 
+  // 4. {{PROXIES}} → 过滤后的代理节点内联 YAML 块
+  if (output.includes('{{PROXIES}}') || output.includes('# {{PROXIES}}')) {
+    const proxyYaml = filteredProxies.length > 0
+      ? filteredProxies.map(p => jsyaml.dump(p, { lineWidth: -1 }).split('\n').map((l, i) => i === 0 ? `  - ${l}` : `    ${l}`).filter(l => l.trim()).join('\n')).join('\n')
+      : '  []';
+    output = output
+      .replace(/^\s*#\s*\{\{PROXIES\}\}\s*$/m, proxyYaml)
+      .replace(/\{\{PROXIES\}\}/g, proxyYaml);
+  }
+
+  // {{PROXY_NAMES}} → 过滤后的代理名称列表（YAML 序列格式）
+  if (output.includes('{{PROXY_NAMES}}')) {
+    const namesYaml = filteredProxies.map(p => `  - "${p.name}"`).join('\n');
+    output = output.replace(/\{\{PROXY_NAMES\}\}/g, namesYaml);
+  }
+
   // {{URL_0}}, {{URL_1}}, ... → 对应下标 URL
   group.urls.forEach((entry, i) => {
     output = output.replace(new RegExp(`\\{\\{URL_${i}\\}\\}`, 'g'), entry.url);
@@ -865,29 +944,8 @@ async function renderTemplate(template: string, group: SubscriptionGroup, env: E
   // {{URL_ALL}} → 所有 URL 以换行分隔
   output = output.replace(/\{\{URL_ALL\}\}/g, group.urls.map(e => e.url).join('\n'));
 
-  // 编译高级过滤正则
-  let compiledFilter = group.filter || '';
-  if (compiledFilter.startsWith('{"advanced":true')) {
-    try {
-      const data = JSON.parse(compiledFilter);
-      const rules = data.rules || [];
-      const orIncludes = rules.filter((r: any) => r.logic === 'or').map((r: any) => r.value).filter(Boolean);
-      const andIncludes = rules.filter((r: any) => r.logic === 'and').map((r: any) => r.value).filter(Boolean);
-      const notExcludes = rules.filter((r: any) => r.logic === 'not').map((r: any) => r.value).filter(Boolean);
-      
-      let regex = '^';
-      if (orIncludes.length > 0) regex += `(?=.*(${orIncludes.join('|')}))`;
-      for (const andInc of andIncludes) regex += `(?=.*${andInc})`;
-      if (notExcludes.length > 0) regex += `(?!.*(${notExcludes.join('|')}))`;
-      regex += '.*$';
-      
-      compiledFilter = regex === '^.*$' ? '' : regex;
-    } catch {
-      // 解析失败则使用原始字符串
-    }
-  }
-
-  // 通用变量
+  // 通用变量（{{GROUP_FILTER}} 输出编译后的正则字符串）
+  const compiledFilter = compileGroupFilter(group.filter);
   output = output
     .replace(/\{\{GROUP_NAME\}\}/g,    group.title)
     .replace(/\{\{GROUP_FILTER\}\}/g,  compiledFilter)
