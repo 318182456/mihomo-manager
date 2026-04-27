@@ -264,8 +264,9 @@ function normalizeUrls(raw: any[]): UrlEntry[] {
 async function fetchAndExtractUrl(entry: UrlEntry): Promise<{ ok: boolean; url?: string; msg: string }> {
   if (!entry.refreshUrl) return { ok: false, msg: '未配置 refreshUrl' };
   let resp: Response;
+  const urlToFetch = entry.refreshUrl.trim();
   try {
-    resp = await fetch(entry.refreshUrl, {
+    resp = await fetch(urlToFetch, {
       headers: { 'Accept': 'application/json', ...(entry.refreshHeaders ?? {}) },
     });
   } catch (e) { return { ok: false, msg: `请求失败: ${String(e)}` }; }
@@ -285,7 +286,7 @@ async function fetchAndExtractUrl(entry: UrlEntry): Promise<{ ok: boolean; url?:
       ?? json.data?.subscribe_url ?? json.data?.sub_url ?? json.data?.url;
   }
   if (!val || typeof val !== 'string') return { ok: false, msg: `无法提取URL（路径: ${path}）` };
-  return { ok: true, url: val, msg: val };
+  return { ok: true, url: val.trim(), msg: val };
 }
 
 /** 批量刷新一个订阅组内所有配置了 refreshUrl 的 URL 条目 */
@@ -691,7 +692,7 @@ async function fetchSubscriptionUserInfo(entries: UrlEntry[]): Promise<string> {
   let foundInfo = false;
 
   const results = await Promise.allSettled(entries.map(entry =>
-    fetch(entry.url, { method: 'GET', headers: { 'User-Agent': 'Clash/1.8.0' } })
+    fetch(entry.url.trim(), { method: 'GET', headers: { 'User-Agent': 'Clash/1.8.0' } })
   ));
 
   for (const res of results) {
@@ -743,7 +744,7 @@ async function handleSubFetch(pathname: string, env: Env, request: Request): Pro
   if (!tpl) {
     const results = await Promise.allSettled(
       group.urls.map(entry =>
-        fetch(entry.url, {headers:{'User-Agent':'clash.meta'}}).then(r=>r.text())
+        fetch(entry.url.trim(), {headers:{'User-Agent':'clash.meta'}}).then(r=>r.text())
       )
     );
     const content = results

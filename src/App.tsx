@@ -451,7 +451,15 @@ function SubscriptionsView() {
   // 保存整组 urls（onBlur 时调用）
   const saveUrls = (gid: string) => {
     const g = groups.find(x => x.id === gid);
-    if (g) handleUpdateGroup(gid, { urls: g.urls });
+    if (g) {
+      const trimmedUrls = g.urls.map(u => ({
+        ...u,
+        url: u.url.trim(),
+        refreshUrl: u.refreshUrl?.trim() || undefined
+      }));
+      handleUpdateGroup(gid, { urls: trimmedUrls });
+      setGroups(groups.map(gr => gr.id === gid ? { ...gr, urls: trimmedUrls } : gr));
+    }
   };
 
   // 刷新单个 URL 条目
@@ -575,7 +583,7 @@ function SubscriptionsView() {
                           />
                         </div>
                         <div>
-                          <label className="block text-[9px] font-display text-technical-muted uppercase tracking-widest mb-1">请求头 JSON (refreshHeaders)</label>
+                          <label className="block text-[9px] font-display text-technical-muted uppercase tracking-widest mb-1">请求头 JSON (refreshHeaders - 选填)</label>
                           <textarea rows={2}
                             value={entry.refreshHeaders ? JSON.stringify(entry.refreshHeaders, null, 2) : ''}
                             onChange={(e) => { try { setUrlField(group.id, i, 'refreshHeaders', e.target.value ? JSON.parse(e.target.value) : undefined); } catch {} }}
@@ -585,7 +593,7 @@ function SubscriptionsView() {
                           />
                         </div>
                         <div>
-                          <label className="block text-[9px] font-display text-technical-muted uppercase tracking-widest mb-1">响应字段路径 (refreshJsonPath)</label>
+                          <label className="block text-[9px] font-display text-technical-muted uppercase tracking-widest mb-1">响应字段路径 (refreshJsonPath - 选填)</label>
                           <input type="text" value={entry.refreshJsonPath ?? ''}
                             onChange={(e) => setUrlField(group.id, i, 'refreshJsonPath', e.target.value)}
                             onBlur={() => saveUrls(group.id)}
