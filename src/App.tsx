@@ -148,7 +148,7 @@ export default function App() {
           </div>
         </header>
 
-        <main className="flex-1 overflow-y-auto bg-technical-bg">
+        <main className="flex-1 flex flex-col overflow-y-auto bg-technical-bg relative">
           <AnimatePresence mode="wait">
             <motion.div
               key={currentView}
@@ -156,7 +156,7 @@ export default function App() {
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -10 }}
               transition={{ duration: 0.2 }}
-              className="h-full"
+              className="flex-1 flex flex-col min-h-full"
             >
               {renderView()}
             </motion.div>
@@ -712,8 +712,8 @@ function TemplatesView() {
   if (loading) return <div className="p-10 text-technical-muted font-mono">Loading...</div>;
 
   return (
-    <div className="flex h-full w-full bg-technical-bg font-sans">
-      <aside className="w-64 border-r border-technical-border flex flex-col hidden lg:flex bg-black">
+    <div className="flex-1 flex h-full w-full bg-technical-bg font-sans">
+      <aside className="w-64 shrink-0 border-r border-technical-border flex flex-col hidden lg:flex bg-black">
         <div className="p-4 border-b border-technical-border flex items-center justify-between">
           <div className="flex items-center gap-2 text-[10px] font-display font-bold uppercase tracking-widest text-white">
             <Folder size={14} className="text-technical-cyan" />
