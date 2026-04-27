@@ -138,6 +138,8 @@ export const refreshSubscription = (id: string) =>
   apiFetch<{ refreshed: number; errors: string[] }>(`/api/subscriptions/${id}/refresh`, { method:'POST' });
 export const refreshUrlEntry = (groupId: string, urlIndex: number) =>
   apiFetch<{ ok: boolean; url: string }>(`/api/subscriptions/${groupId}/urls/${urlIndex}/refresh`, { method:'POST' });
+export const getSubscriptionProxies = (id: string) =>
+  apiFetch<string[]>(`/api/subscriptions/${id}/proxies`);
 
 // ---------- Templates ----------
 

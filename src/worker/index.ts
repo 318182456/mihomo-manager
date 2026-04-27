@@ -6,6 +6,7 @@ import {
   generateAuthenticationOptions,
   verifyAuthenticationResponse,
 } from '@simplewebauthn/server';
+import jsyaml from 'js-yaml';
 import type {
   RegistrationResponseJSON,
   AuthenticationResponseJSON,
@@ -532,6 +533,9 @@ async function handleAPI(request: Request, env: Env, pathname: string): Promise<
         if (method === 'POST' && id && action === 'refresh') {
           return handleSubscriptionRefresh(id, env.KV);
         }
+        if (method === 'GET' && id && action === 'proxies') {
+          return handleSubscriptionProxies(id, env.KV);
+        }
         // POST /api/subscriptions/:id/urls/:index/refresh  刷新单个 URL 条目
         if (method === 'POST' && id && action === 'urls' && parts[4] === 'refresh') {
           const urlIndex = parseInt(parts[3] ?? '-1', 10);
@@ -593,6 +597,39 @@ async function handleSubscriptionRefresh(id: string, kv: KVNamespace): Promise<R
   if (!entries.some(e => e.refreshUrl)) return err('该订阅组内无配置 refreshUrl 的条目', 400);
   const result = await refreshGroupUrls(id, kv);
   return ok(result);
+}
+
+// ---------- 获取订阅组内所有代理节点 ----------
+
+async function handleSubscriptionProxies(id: string, kv: KVNamespace): Promise<Response> {
+  const raw = await kv.get('subscriptions');
+  const list: any[] = raw ? JSON.parse(raw) : [];
+  const group = list.find((s: any) => s.id === id);
+  if (!group) return err404();
+  const entries = normalizeUrls(group.urls ?? []);
+  
+  const results = await Promise.allSettled(entries.map(entry =>
+    fetch(entry.url.trim(), { method: 'GET', headers: { 'User-Agent': 'clash.meta' } }).then(r => r.text())
+  ));
+
+  const proxies: Set<string> = new Set();
+  
+  for (const res of results) {
+    if (res.status === 'fulfilled' && res.value) {
+      try {
+        const parsed = jsyaml.load(res.value) as any;
+        if (parsed && Array.isArray(parsed.proxies)) {
+          for (const p of parsed.proxies) {
+            if (p && p.name) proxies.add(p.name);
+          }
+        }
+      } catch (e) {
+        // 忽略解析错误
+      }
+    }
+  }
+
+  return ok(Array.from(proxies));
 }
 
 // ---------- 单个 URL 条目刷新 ----------

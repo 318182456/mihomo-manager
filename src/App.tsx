@@ -420,6 +420,21 @@ function SubscriptionsView() {
   const [refreshingKey, setRefreshingKey] = useState<string | null>(null);
   const [urlMsg, setUrlMsg] = useState<{ key: string; ok: boolean; text: string } | null>(null);
 
+  const [proxyCache, setProxyCache] = useState<Record<string, string[]>>({});
+  const [loadingProxies, setLoadingProxies] = useState<Record<string, boolean>>({});
+
+  const handleFetchProxies = async (groupId: string) => {
+    setLoadingProxies(prev => ({ ...prev, [groupId]: true }));
+    try {
+      const names = await api.getSubscriptionProxies(groupId);
+      setProxyCache(prev => ({ ...prev, [groupId]: names }));
+    } catch (e) {
+      alert('获取代理节点失败');
+    } finally {
+      setLoadingProxies(prev => ({ ...prev, [groupId]: false }));
+    }
+  };
+
   const urlKey = (gid: string, i: number) => `${gid}-${i}`;
 
   const loadData = async () => {
@@ -518,16 +533,51 @@ function SubscriptionsView() {
             </div>
 
             {/* 筛选正则 */}
-            <div className="px-4 py-3 border-b border-technical-border/50 flex items-center gap-3">
-              <div className="flex items-center gap-2 text-technical-muted font-display text-[10px] uppercase tracking-widest whitespace-nowrap shrink-0">
-                <Filter size={13} /><span>筛选:</span>
+            <div className="px-4 py-3 border-b border-technical-border/50 flex flex-col gap-3">
+              <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2 text-technical-muted font-display text-[10px] uppercase tracking-widest whitespace-nowrap shrink-0">
+                  <Filter size={13} /><span>筛选:</span>
+                </div>
+                <input type="text" value={group.filter}
+                  onChange={(e) => setGroups(groups.map(g => g.id === group.id ? { ...g, filter: e.target.value } : g))}
+                  onBlur={(e) => handleUpdateGroup(group.id, { filter: e.target.value })}
+                  placeholder="留空则不筛选"
+                  className="flex-1 bg-black/40 border border-technical-border rounded-sm px-3 py-1 font-mono text-xs text-technical-cyan focus:outline-none focus:border-technical-cyan/30 transition-all"
+                />
+                <button
+                  onClick={() => handleFetchProxies(group.id)}
+                  disabled={loadingProxies[group.id]}
+                  className="technical-button-outline py-1 px-3 text-[10px] shrink-0 disabled:opacity-50"
+                >
+                  {loadingProxies[group.id] ? <Activity size={12} className="animate-spin" /> : <RefreshCw size={12} />}
+                  <span className="ml-1">{loadingProxies[group.id] ? '获取中...' : '测试过滤'}</span>
+                </button>
               </div>
-              <input type="text" value={group.filter}
-                onChange={(e) => setGroups(groups.map(g => g.id === group.id ? { ...g, filter: e.target.value } : g))}
-                onBlur={(e) => handleUpdateGroup(group.id, { filter: e.target.value })}
-                placeholder="留空则不筛选"
-                className="flex-1 bg-black/40 border border-technical-border rounded-sm px-3 py-1 font-mono text-xs text-technical-cyan focus:outline-none focus:border-technical-cyan/30 transition-all"
-              />
+              {proxyCache[group.id] && (
+                <div className="bg-black/60 border border-technical-border/50 rounded p-2 text-xs font-mono max-h-40 overflow-y-auto">
+                  <div className="text-[10px] text-technical-muted mb-2 border-b border-technical-border/30 pb-1 flex justify-between">
+                    <span>总计 {proxyCache[group.id].length} 个节点</span>
+                    <span>
+                      已过滤出 {proxyCache[group.id].filter(p => !group.filter || new RegExp(group.filter).test(p)).length} 个
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {proxyCache[group.id].map((p, idx) => {
+                      let isMatch = true;
+                      try {
+                        isMatch = !group.filter || new RegExp(group.filter).test(p);
+                      } catch {
+                        isMatch = false;
+                      }
+                      return (
+                        <span key={idx} className={`px-1.5 py-0.5 rounded-sm text-[10px] ${isMatch ? 'bg-technical-cyan/20 text-technical-cyan border border-technical-cyan/30' : 'bg-zinc-800 text-zinc-500 line-through border border-transparent'}`}>
+                          {p}
+                        </span>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* URL 列表 */}
@@ -546,6 +596,10 @@ function SubscriptionsView() {
                         onBlur={() => saveUrls(group.id)}
                         className="flex-1 min-w-0 bg-transparent border-none p-0 font-mono text-xs text-gray-400 focus:ring-0 outline-none truncate"
                       />
+                      {/* 最近刷新指示 */}
+                      {entry.lastRefreshedAt && (
+                        <Clock size={11} className="text-zinc-600 shrink-0" title={`最近刷新: ${new Date(entry.lastRefreshedAt).toLocaleString('zh-CN')}`} />
+                      )}
                       {/* 名称 */}
                       <input type="text" value={entry.name ?? ''}
                         onChange={(e) => setUrlField(group.id, i, 'name', e.target.value)}
@@ -553,10 +607,6 @@ function SubscriptionsView() {
                         placeholder="名称"
                         className="w-20 bg-zinc-900 border border-technical-border/50 rounded-sm px-2 py-0.5 font-mono text-[11px] text-technical-cyan focus:outline-none focus:border-technical-cyan/50 shrink-0"
                       />
-                      {/* 最近刷新指示 */}
-                      {entry.lastRefreshedAt && (
-                        <Clock size={11} className="text-zinc-600 shrink-0" title={`最近刷新: ${new Date(entry.lastRefreshedAt).toLocaleString('zh-CN')}`} />
-                      )}
                       {/* 展开刷新配置 */}
                       <button
                         onClick={() => setExpandedKey(isExpanded ? null : key)}
