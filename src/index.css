@@ -30,8 +30,24 @@
 }
 
 @layer base {
+  html, body {
+    @apply overflow-hidden w-full h-full;
+  }
+  
   body {
     @apply bg-technical-bg text-gray-200 font-sans antialiased selection:bg-technical-cyan/30;
+  }
+
+  /* 隐藏所有元素的横纵滚动条，但保留滚动功能 */
+  * {
+    scrollbar-width: none !important;
+    -ms-overflow-style: none !important;
+  }
+  
+  ::-webkit-scrollbar {
+    display: none !important;
+    width: 0 !important;
+    height: 0 !important;
   }
 }
 

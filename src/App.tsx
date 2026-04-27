@@ -76,7 +76,7 @@ export default function App() {
   };
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-technical-bg text-gray-200">
+    <div className="flex h-full w-full overflow-hidden bg-technical-bg text-gray-200">
       {/* Sidebar - Desktop */}
       <nav className="hidden md:flex flex-col w-64 bg-black border-r border-technical-border z-20">
         <div className="h-16 flex items-center px-6 border-b border-technical-border gap-3">
