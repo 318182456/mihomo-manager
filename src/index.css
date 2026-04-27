@@ -6,12 +6,27 @@
   --font-display: "Space Grotesk", sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
 
-  --color-technical-bg: #0d0d0e;
-  --color-technical-surface: #131315;
-  --color-technical-border: #202023;
-  --color-technical-cyan: #00f0ff;
-  --color-technical-cyan-dim: rgba(0, 240, 255, 0.1);
-  --color-technical-muted: #6a7a7b;
+  /* 主题色（亮色模式） */
+  --color-technical-bg: #f8fafc;
+  --color-technical-surface: #ffffff;
+  --color-technical-border: #e2e8f0;
+  --color-technical-cyan: #0284c7;
+  --color-technical-cyan-dim: rgba(2, 132, 199, 0.1);
+  --color-technical-muted: #64748b;
+
+  /* 反转 App.tsx 中硬编码的暗色变量为亮色 */
+  --color-black: #ffffff;
+  --color-white: #0f172a;
+  
+  --color-zinc-950: #ffffff;
+  --color-zinc-900: #f1f5f9;
+  --color-zinc-800: #e2e8f0;
+  --color-zinc-700: #cbd5e1;
+  --color-zinc-600: #94a3b8;
+  
+  --color-gray-400: #475569;
+  --color-gray-300: #334155;
+  --color-gray-200: #1e293b;
 }
 
 @layer base {
