@@ -1,5 +1,8 @@
 import { useState, useEffect } from 'react';
 import type { FormEvent } from 'react';
+import CodeMirror from '@uiw/react-codemirror';
+import { yaml } from '@codemirror/lang-yaml';
+import jsyaml from 'js-yaml';
 import {
   LayoutDashboard,
   Rss,
@@ -148,7 +151,7 @@ export default function App() {
           </div>
         </header>
 
-        <main className="flex-1 flex flex-col overflow-hidden bg-technical-bg">
+        <main className="h-[calc(100vh-64px)] w-full flex flex-col overflow-hidden bg-technical-bg">
           <AnimatePresence mode="wait">
             <motion.div
               key={currentView}
@@ -653,7 +656,20 @@ function TemplatesView() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
+  const [yamlError, setYamlError] = useState<string | null>(null);
+
   const activeTemplate = templates.find(t => t.id === activeId);
+
+  useEffect(() => {
+    if (activeTemplate) {
+      try {
+        jsyaml.load(activeTemplate.content);
+        setYamlError(null);
+      } catch (e: any) {
+        setYamlError(e.message);
+      }
+    }
+  }, [activeTemplate?.id]);
 
   const loadData = async () => {
     try {
@@ -706,6 +722,17 @@ function TemplatesView() {
       alert('保存失败');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleContentChange = (val: string) => {
+    if (!activeTemplate) return;
+    setTemplates(templates.map(t => t.id === activeTemplate.id ? { ...t, content: val } : t));
+    try {
+      jsyaml.load(val);
+      setYamlError(null);
+    } catch (e: any) {
+      setYamlError(e.message);
     }
   };
 
@@ -763,21 +790,30 @@ function TemplatesView() {
               </div>
             </div>
 
-            <div className="flex-1 flex overflow-hidden relative">
-               <textarea 
+            <div className="flex-1 flex flex-col overflow-hidden relative">
+               <CodeMirror
                   value={activeTemplate.content}
-                  onChange={(e) => setTemplates(templates.map(t => t.id === activeTemplate.id ? { ...t, content: e.target.value } : t))}
-                  className="flex-1 w-full h-full p-4 bg-transparent text-gray-300 font-mono text-sm leading-relaxed focus:outline-none resize-none"
-                  spellCheck={false}
+                  height="100%"
+                  extensions={[yaml()]}
+                  onChange={handleContentChange}
+                  theme="light"
+                  className="flex-1 overflow-auto text-sm"
                />
             </div>
             
-            <div className="h-7 bg-black border-t border-technical-border flex items-center justify-between px-4 text-[10px] font-mono text-technical-muted">
+            <div className="min-h-7 bg-white border-t border-technical-border flex items-center justify-between px-4 py-1 text-[10px] font-mono text-technical-muted">
               <div className="flex items-center gap-6">
-                <div className="flex items-center gap-1.5">
-                  <CheckCircle2 size={12} className="text-green-500" />
-                  <span>YAML 语法提示</span>
-                </div>
+                {yamlError ? (
+                  <div className="flex items-center gap-1.5 text-red-500">
+                    <XCircle size={12} />
+                    <span className="truncate max-w-md">{yamlError}</span>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-1.5 text-green-600">
+                    <CheckCircle2 size={12} />
+                    <span>YAML 语法正确</span>
+                  </div>
+                )}
               </div>
               <div className="flex items-center gap-4">
                 <span>UTF-8</span>
