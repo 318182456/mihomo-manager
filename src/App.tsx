@@ -148,7 +148,7 @@ export default function App() {
           </div>
         </header>
 
-        <main className="flex-1 bg-technical-bg relative">
+        <main className="flex-1 flex flex-col relative w-full h-full overflow-hidden bg-technical-bg">
           <AnimatePresence mode="wait">
             <motion.div
               key={currentView}
