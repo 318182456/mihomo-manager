@@ -412,71 +412,59 @@ function SubscriptionsView() {
   const [groups, setGroups] = useState<api.SubscriptionGroup[]>([]);
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState<string | null>(null);
-  const [refreshingId, setRefreshingId] = useState<string | null>(null);
-  const [refreshMsg, setRefreshMsg] = useState<{ id: string; ok: boolean; msg: string } | null>(null);
-  const [expandedRefresh, setExpandedRefresh] = useState<string | null>(null);
+  // 展开的 URL 行：key = `${groupId}-${index}`
+  const [expandedKey, setExpandedKey] = useState<string | null>(null);
+  const [refreshingKey, setRefreshingKey] = useState<string | null>(null);
+  const [urlMsg, setUrlMsg] = useState<{ key: string; ok: boolean; text: string } | null>(null);
+
+  const urlKey = (gid: string, i: number) => `${gid}-${i}`;
 
   const loadData = async () => {
-    try {
-      const data = await api.getSubscriptions();
-      setGroups(data);
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setLoading(false);
-    }
+    try { setGroups(await api.getSubscriptions()); }
+    catch (e) { console.error(e); }
+    finally { setLoading(false); }
   };
-
   useEffect(() => { loadData(); }, []);
 
   const handleAddGroup = async () => {
-    try {
-      await api.createSubscription({
-        title: '新建订阅组',
-        enabled: true,
-        filter: '',
-        urls: []
-      });
-      loadData();
-    } catch (e) {
-      alert('添加失败');
-    }
+    try { await api.createSubscription({ title: '新建订阅组', enabled: true, filter: '', urls: [] }); loadData(); }
+    catch { alert('添加失败'); }
   };
-
   const handleDeleteGroup = async (id: string) => {
     if (!confirm('确定删除此订阅组吗？')) return;
-    try {
-      await api.deleteSubscription(id);
-      loadData();
-    } catch (e) {
-      alert('删除失败');
-    }
+    try { await api.deleteSubscription(id); loadData(); }
+    catch { alert('删除失败'); }
   };
-
-  const handleRefreshGroup = async (group: api.SubscriptionGroup) => {
-    setRefreshingId(group.id);
-    setRefreshMsg(null);
-    try {
-      const result = await api.refreshSubscription(group.id);
-      setRefreshMsg({ id: group.id, ok: true, msg: `已更新: ${result.msg}` });
-      loadData();
-    } catch (e: any) {
-      setRefreshMsg({ id: group.id, ok: false, msg: e.message || '刷新失败' });
-    } finally {
-      setRefreshingId(null);
-    }
-  };
-
   const handleUpdateGroup = async (id: string, updates: Partial<api.SubscriptionGroup>) => {
     setSavingId(id);
+    try { await api.updateSubscription(id, updates); setGroups(groups.map(g => g.id === id ? { ...g, ...updates } : g)); }
+    catch { alert('保存失败'); }
+    finally { setSavingId(null); }
+  };
+
+  // 修改单个 URL 条目的某个字段（本地 state）
+  const setUrlField = (gid: string, i: number, field: keyof api.UrlEntry, value: any) =>
+    setGroups(groups.map(g => g.id !== gid ? g : {
+      ...g, urls: g.urls.map((u, j) => j === i ? { ...u, [field]: value || undefined } : u)
+    }));
+
+  // 保存整组 urls（onBlur 时调用）
+  const saveUrls = (gid: string) => {
+    const g = groups.find(x => x.id === gid);
+    if (g) handleUpdateGroup(gid, { urls: g.urls });
+  };
+
+  // 刷新单个 URL 条目
+  const handleUrlRefresh = async (gid: string, i: number) => {
+    const key = urlKey(gid, i);
+    setRefreshingKey(key); setUrlMsg(null);
     try {
-      await api.updateSubscription(id, updates);
-      setGroups(groups.map(g => g.id === id ? { ...g, ...updates } : g));
-    } catch (e) {
-      alert('保存失败');
-    } finally {
-      setSavingId(null);
-    }
+      const r = await api.refreshUrlEntry(gid, i);
+      setUrlMsg({ key, ok: true, text: r.url });
+      loadData();
+    } catch (e: any) {
+      setUrlMsg({ key, ok: false, text: e.message || '刷新失败' });
+    } finally { setRefreshingKey(null); }
   };
 
   if (loading) return <div className="p-10 text-technical-muted font-mono">Loading...</div>;
@@ -488,205 +476,163 @@ function SubscriptionsView() {
           <h2 className="text-2xl font-display font-bold text-white">订阅源</h2>
           <p className="text-sm text-technical-muted mt-1">管理外部代理列表和配置上游 URL。</p>
         </div>
-        <div className="flex flex-wrap gap-3">
-          <button className="technical-button-primary" onClick={handleAddGroup}>
-            <Plus size={14} />
-            <span>添加组</span>
-          </button>
-        </div>
+        <button className="technical-button-primary" onClick={handleAddGroup}>
+          <Plus size={14} /><span>添加组</span>
+        </button>
       </div>
 
       <div className="space-y-8">
         {groups.map((group) => (
           <section key={group.id} className={`technical-card flex flex-col ${!group.enabled ? 'opacity-60 grayscale' : ''}`}>
-             <div className="bg-zinc-900 px-4 py-3 flex justify-between items-center border-b border-technical-border">
-                <div className="flex items-center gap-3 flex-1 min-w-0">
-                  <Folder size={18} className="text-technical-muted shrink-0" />
-                  <input 
-                    className="bg-transparent border-none text-gray-200 font-display font-bold p-0 focus:ring-0 outline-none w-full max-w-xs"
-                    type="text" 
-                    value={group.title}
-                    onChange={(e) => setGroups(groups.map(g => g.id === group.id ? { ...g, title: e.target.value } : g))}
-                    onBlur={(e) => handleUpdateGroup(group.id, { title: e.target.value })}
-                  />
-                  {savingId === group.id && <Activity size={14} className="text-technical-cyan animate-spin" />}
-                </div>
-                <div className="flex items-center gap-6 shrink-0 ml-4">
-                  <button className="text-red-500/50 hover:text-red-500" onClick={() => handleDeleteGroup(group.id)} title="删除组">
-                    <Trash2 size={16} />
-                  </button>
-                  <div className="font-mono text-[10px] text-technical-muted bg-black border border-technical-border px-2 py-1 rounded">
-                    {group.urls.length} 个 URL
-                  </div>
-                  <label className="relative inline-flex items-center cursor-pointer">
-                    <input 
-                      type="checkbox" 
-                      checked={group.enabled} 
-                      onChange={(e) => handleUpdateGroup(group.id, { enabled: e.target.checked })}
-                      className="sr-only peer" 
-                    />
-                    <div className="w-8 h-4.5 bg-zinc-800 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[3px] after:left-[3px] after:bg-gray-400 after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-technical-cyan/40 peer-checked:after:bg-technical-cyan" />
-                  </label>
-                </div>
-             </div>
-
-             <div className="px-4 py-4 border-b border-technical-border/50 flex items-center gap-4">
-                <div className="flex items-center gap-2 text-technical-muted font-display text-[10px] uppercase tracking-widest whitespace-nowrap shrink-0">
-                  <Filter size={14} />
-                  <span>筛选正则:</span>
-                </div>
-                <input 
-                  type="text" 
-                  value={group.filter}
-                  onChange={(e) => setGroups(groups.map(g => g.id === group.id ? { ...g, filter: e.target.value } : g))}
-                  onBlur={(e) => handleUpdateGroup(group.id, { filter: e.target.value })}
-                  placeholder="留空则不筛选"
-                  className="flex-1 bg-black/40 border border-technical-border rounded-sm px-3 py-1 font-mono text-xs text-technical-cyan focus:outline-none focus:border-technical-cyan/30 transition-all"
+            {/* 组头 */}
+            <div className="bg-zinc-900 px-4 py-3 flex justify-between items-center border-b border-technical-border">
+              <div className="flex items-center gap-3 flex-1 min-w-0">
+                <Folder size={18} className="text-technical-muted shrink-0" />
+                <input
+                  className="bg-transparent border-none text-gray-200 font-display font-bold p-0 focus:ring-0 outline-none w-full max-w-xs"
+                  type="text" value={group.title}
+                  onChange={(e) => setGroups(groups.map(g => g.id === group.id ? { ...g, title: e.target.value } : g))}
+                  onBlur={(e) => handleUpdateGroup(group.id, { title: e.target.value })}
                 />
-             </div>
+                {savingId === group.id && <Activity size={14} className="text-technical-cyan animate-spin" />}
+              </div>
+              <div className="flex items-center gap-4 shrink-0 ml-4">
+                <button className="text-red-500/50 hover:text-red-500" onClick={() => handleDeleteGroup(group.id)}><Trash2 size={16} /></button>
+                <div className="font-mono text-[10px] text-technical-muted bg-black border border-technical-border px-2 py-1 rounded">{group.urls.length} 个 URL</div>
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input type="checkbox" checked={group.enabled} onChange={(e) => handleUpdateGroup(group.id, { enabled: e.target.checked })} className="sr-only peer" />
+                  <div className="w-8 h-4.5 bg-zinc-800 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[3px] after:left-[3px] after:bg-gray-400 after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-technical-cyan/40 peer-checked:after:bg-technical-cyan" />
+                </label>
+              </div>
+            </div>
 
-             {/* 刷新配置区 */}
-             <div className="border-b border-technical-border/50">
-               <button
-                 onClick={() => setExpandedRefresh(expandedRefresh === group.id ? null : group.id)}
-                 className="w-full flex items-center justify-between px-4 py-3 text-[10px] font-display font-bold uppercase tracking-widest text-technical-muted hover:text-technical-cyan hover:bg-white/5 transition-all"
-               >
-                 <div className="flex items-center gap-2">
-                   <RefreshCw size={13} />
-                   <span>自动更新配置</span>
-                   {group.refreshUrl && (
-                     <span className="px-1.5 py-0.5 bg-technical-cyan/10 text-technical-cyan rounded text-[9px]">已启用</span>
-                   )}
-                   {group.lastRefreshedAt && (
-                     <span className="flex items-center gap-1 text-zinc-600 text-[9px] font-normal normal-case tracking-normal">
-                       <Clock size={9} />
-                       {new Date(group.lastRefreshedAt).toLocaleString('zh-CN')}
-                     </span>
-                   )}
-                 </div>
-                 <ChevronDown size={13} className={`transition-transform ${expandedRefresh === group.id ? 'rotate-180' : ''}`} />
-               </button>
+            {/* 筛选正则 */}
+            <div className="px-4 py-3 border-b border-technical-border/50 flex items-center gap-3">
+              <div className="flex items-center gap-2 text-technical-muted font-display text-[10px] uppercase tracking-widest whitespace-nowrap shrink-0">
+                <Filter size={13} /><span>筛选:</span>
+              </div>
+              <input type="text" value={group.filter}
+                onChange={(e) => setGroups(groups.map(g => g.id === group.id ? { ...g, filter: e.target.value } : g))}
+                onBlur={(e) => handleUpdateGroup(group.id, { filter: e.target.value })}
+                placeholder="留空则不筛选"
+                className="flex-1 bg-black/40 border border-technical-border rounded-sm px-3 py-1 font-mono text-xs text-technical-cyan focus:outline-none focus:border-technical-cyan/30 transition-all"
+              />
+            </div>
 
-               {expandedRefresh === group.id && (
-                 <div className="px-4 pb-4 space-y-3 bg-black/30">
-                   <div className="text-[9px] font-mono text-zinc-600 pt-2">每天 UTC 00:00 自动请求以下接口，将响应中的订阅URL覆写到 urls[0]</div>
-
-                   <div className="space-y-1">
-                     <label className="block text-[10px] font-display text-technical-muted uppercase tracking-widest">接口地址 (refreshUrl)</label>
-                     <input
-                       type="text"
-                       value={group.refreshUrl ?? ''}
-                       onChange={(e) => setGroups(groups.map(g => g.id === group.id ? { ...g, refreshUrl: e.target.value } : g))}
-                       onBlur={(e) => handleUpdateGroup(group.id, { refreshUrl: e.target.value || undefined })}
-                       placeholder="https://example.com/api/getSubscribe"
-                       className="w-full bg-black/40 border border-technical-border rounded-sm px-3 py-1.5 font-mono text-xs text-gray-300 focus:outline-none focus:border-technical-cyan/50 transition-all"
-                     />
-                   </div>
-
-                   <div className="space-y-1">
-                     <label className="block text-[10px] font-display text-technical-muted uppercase tracking-widest">请求头 JSON (refreshHeaders)</label>
-                     <textarea
-                       rows={3}
-                       value={group.refreshHeaders ? JSON.stringify(group.refreshHeaders, null, 2) : ''}
-                       onChange={(e) => {
-                         try {
-                           const h = e.target.value ? JSON.parse(e.target.value) : undefined;
-                           setGroups(groups.map(g => g.id === group.id ? { ...g, refreshHeaders: h } : g));
-                         } catch { /* 输入中，暂不 parse */ }
-                       }}
-                       onBlur={(e) => {
-                         try {
-                           const h = e.target.value ? JSON.parse(e.target.value) : undefined;
-                           handleUpdateGroup(group.id, { refreshHeaders: h });
-                         } catch { alert('请求头 JSON 格式错误'); }
-                       }}
-                       placeholder={'{\n  "authorization": "Bearer your-token"\n}'}
-                       className="w-full bg-black/40 border border-technical-border rounded-sm px-3 py-1.5 font-mono text-xs text-gray-300 focus:outline-none focus:border-technical-cyan/50 transition-all resize-none"
-                     />
-                   </div>
-
-                   <div className="space-y-1">
-                     <label className="block text-[10px] font-display text-technical-muted uppercase tracking-widest">响应字段路径 (refreshJsonPath)</label>
-                     <input
-                       type="text"
-                       value={group.refreshJsonPath ?? ''}
-                       onChange={(e) => setGroups(groups.map(g => g.id === group.id ? { ...g, refreshJsonPath: e.target.value } : g))}
-                       onBlur={(e) => handleUpdateGroup(group.id, { refreshJsonPath: e.target.value || undefined })}
-                       placeholder="subscribe_url  或  data.subscribe_url"
-                       className="w-full bg-black/40 border border-technical-border rounded-sm px-3 py-1.5 font-mono text-xs text-gray-300 focus:outline-none focus:border-technical-cyan/50 transition-all"
-                     />
-                   </div>
-
-                   <div className="flex items-center gap-3 pt-1">
-                     <button
-                       onClick={() => handleRefreshGroup(group)}
-                       disabled={!group.refreshUrl || refreshingId === group.id}
-                       className="technical-button-primary py-1.5 px-4 text-xs gap-2 disabled:opacity-40"
-                     >
-                       <RefreshCw size={13} className={refreshingId === group.id ? 'animate-spin' : ''} />
-                       <span>{refreshingId === group.id ? '刷新中...' : '立即刷新'}</span>
-                     </button>
-                     {refreshMsg?.id === group.id && (
-                       <div className={`flex items-center gap-1.5 text-xs font-mono ${
-                         refreshMsg.ok ? 'text-green-400' : 'text-red-400'
-                       }`}>
-                         {refreshMsg.ok ? <CheckCircle2 size={13} /> : <AlertTriangle size={13} />}
-                         <span className="truncate max-w-xs">{refreshMsg.msg}</span>
-                       </div>
-                     )}
-                   </div>
-                 </div>
-               )}
-             </div>
-
-             <div className="flex flex-col bg-black/20">
-                {group.urls.map((url, i) => (
-                  <div key={i} className="group flex items-center gap-3 px-4 py-3 border-b border-technical-border/30 last:border-0 hover:bg-white/5 transition-colors">
-                    <GripVertical size={16} className="text-zinc-800 cursor-grab group-hover:text-zinc-600" />
-                    <input 
-                      type="text" 
-                      value={url}
-                      onChange={(e) => {
-                        const newUrls = [...group.urls];
-                        newUrls[i] = e.target.value;
-                        setGroups(groups.map(g => g.id === group.id ? { ...g, urls: newUrls } : g));
-                      }}
-                      onBlur={() => handleUpdateGroup(group.id, { urls: group.urls })}
-                      className="flex-1 bg-transparent border-none p-0 font-mono text-xs text-gray-400 focus:ring-0 outline-none truncate"
-                    />
-                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <button 
-                        onClick={() => {
-                          const newUrls = group.urls.filter((_, idx) => idx !== i);
-                          handleUpdateGroup(group.id, { urls: newUrls });
-                        }}
-                        className="p-1.5 text-technical-muted hover:text-red-500 transition-colors"
+            {/* URL 列表 */}
+            <div className="flex flex-col bg-black/20">
+              {group.urls.map((entry, i) => {
+                const key = urlKey(group.id, i);
+                const isExpanded = expandedKey === key;
+                return (
+                  <div key={i} className="border-b border-technical-border/30 last:border-0">
+                    {/* URL 主行 */}
+                    <div className="group/row flex items-center gap-2 px-4 py-2.5 hover:bg-white/5 transition-colors">
+                      <GripVertical size={15} className="text-zinc-800 cursor-grab group-hover/row:text-zinc-600 shrink-0" />
+                      {/* URL 输入 */}
+                      <input type="text" value={entry.url}
+                        onChange={(e) => setUrlField(group.id, i, 'url', e.target.value)}
+                        onBlur={() => saveUrls(group.id)}
+                        className="flex-1 min-w-0 bg-transparent border-none p-0 font-mono text-xs text-gray-400 focus:ring-0 outline-none truncate"
+                      />
+                      {/* 名称 */}
+                      <input type="text" value={entry.name ?? ''}
+                        onChange={(e) => setUrlField(group.id, i, 'name', e.target.value)}
+                        onBlur={() => saveUrls(group.id)}
+                        placeholder="名称"
+                        className="w-20 bg-zinc-900 border border-technical-border/50 rounded-sm px-2 py-0.5 font-mono text-[11px] text-technical-cyan focus:outline-none focus:border-technical-cyan/50 shrink-0"
+                      />
+                      {/* 最近刷新指示 */}
+                      {entry.lastRefreshedAt && (
+                        <Clock size={11} className="text-zinc-600 shrink-0" title={`最近刷新: ${new Date(entry.lastRefreshedAt).toLocaleString('zh-CN')}`} />
+                      )}
+                      {/* 展开刷新配置 */}
+                      <button
+                        onClick={() => setExpandedKey(isExpanded ? null : key)}
+                        className={`p-1 shrink-0 transition-colors ${entry.refreshUrl ? 'text-technical-cyan/70 hover:text-technical-cyan' : 'text-zinc-700 hover:text-technical-muted'}`}
+                        title="配置自动刷新"
                       >
-                        <Trash2 size={14} />
+                        <ChevronDown size={14} className={`transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
                       </button>
+                      {/* 删除 */}
+                      <button
+                        onClick={() => handleUpdateGroup(group.id, { urls: group.urls.filter((_, idx) => idx !== i) })}
+                        className="p-1 text-technical-muted hover:text-red-500 transition-colors opacity-0 group-hover/row:opacity-100 shrink-0"
+                      ><Trash2 size={13} /></button>
                     </div>
+
+                    {/* 展开：自动刷新配置 */}
+                    {isExpanded && (
+                      <div className="px-10 pb-3 pt-2 space-y-2.5 bg-black/40 border-t border-technical-border/20">
+                        <p className="text-[9px] font-mono text-zinc-600">每天 UTC 00:00 自动请求以下接口获取最新订阅 URL 并覆写本条目</p>
+                        <div>
+                          <label className="block text-[9px] font-display text-technical-muted uppercase tracking-widest mb-1">接口地址 (refreshUrl)</label>
+                          <input type="text" value={entry.refreshUrl ?? ''}
+                            onChange={(e) => setUrlField(group.id, i, 'refreshUrl', e.target.value)}
+                            onBlur={() => saveUrls(group.id)}
+                            placeholder="https://example.com/api/getSubscribe"
+                            className="w-full bg-black/40 border border-technical-border rounded-sm px-2.5 py-1.5 font-mono text-xs text-gray-300 focus:outline-none focus:border-technical-cyan/50"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[9px] font-display text-technical-muted uppercase tracking-widest mb-1">请求头 JSON (refreshHeaders)</label>
+                          <textarea rows={2}
+                            value={entry.refreshHeaders ? JSON.stringify(entry.refreshHeaders, null, 2) : ''}
+                            onChange={(e) => { try { setUrlField(group.id, i, 'refreshHeaders', e.target.value ? JSON.parse(e.target.value) : undefined); } catch {} }}
+                            onBlur={(e) => { try { setUrlField(group.id, i, 'refreshHeaders', e.target.value ? JSON.parse(e.target.value) : undefined); saveUrls(group.id); } catch { alert('JSON 格式错误'); } }}
+                            placeholder={'{\n  "authorization": "Bearer xxx"\n}'}
+                            className="w-full bg-black/40 border border-technical-border rounded-sm px-2.5 py-1.5 font-mono text-xs text-gray-300 focus:outline-none focus:border-technical-cyan/50 resize-none"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[9px] font-display text-technical-muted uppercase tracking-widest mb-1">响应字段路径 (refreshJsonPath)</label>
+                          <input type="text" value={entry.refreshJsonPath ?? ''}
+                            onChange={(e) => setUrlField(group.id, i, 'refreshJsonPath', e.target.value)}
+                            onBlur={() => saveUrls(group.id)}
+                            placeholder="subscribe_url  或  data.subscribe_url"
+                            className="w-full bg-black/40 border border-technical-border rounded-sm px-2.5 py-1.5 font-mono text-xs text-gray-300 focus:outline-none focus:border-technical-cyan/50"
+                          />
+                        </div>
+                        <div className="flex items-center gap-3 pt-0.5">
+                          <button
+                            onClick={() => handleUrlRefresh(group.id, i)}
+                            disabled={!entry.refreshUrl || refreshingKey === key}
+                            className="technical-button-primary py-1 px-3 text-xs gap-1.5 disabled:opacity-40"
+                          >
+                            <RefreshCw size={12} className={refreshingKey === key ? 'animate-spin' : ''} />
+                            <span>{refreshingKey === key ? '刷新中...' : '立即刷新'}</span>
+                          </button>
+                          {urlMsg?.key === key && (
+                            <span className={`text-xs font-mono flex items-center gap-1 ${urlMsg.ok ? 'text-green-400' : 'text-red-400'}`}>
+                              {urlMsg.ok ? <CheckCircle2 size={12} /> : <AlertTriangle size={12} />}
+                              <span className="truncate max-w-xs">{urlMsg.text}</span>
+                            </span>
+                          )}
+                          {entry.lastRefreshedAt && (
+                            <span className="text-[9px] font-mono text-zinc-600 flex items-center gap-1 ml-auto">
+                              <Clock size={9} />{new Date(entry.lastRefreshedAt).toLocaleString('zh-CN')}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    )}
                   </div>
-                ))}
-                
-                <div className="p-4">
-                  <button 
-                    onClick={() => {
-                      const newUrls = [...group.urls, 'https://...'];
-                      handleUpdateGroup(group.id, { urls: newUrls });
-                    }}
-                    className="flex items-center gap-2 text-[10px] font-display font-bold uppercase tracking-widest text-technical-cyan/70 hover:text-technical-cyan transition-colors bg-technical-cyan/5 px-3 py-1.5 rounded-sm w-fit"
-                  >
-                    <Plus size={14} />
-                    <span>添加源 URL</span>
-                  </button>
-                </div>
-             </div>
+                );
+              })}
+
+              <div className="p-4">
+                <button
+                  onClick={() => handleUpdateGroup(group.id, { urls: [...group.urls, { url: 'https://' }] })}
+                  className="flex items-center gap-2 text-[10px] font-display font-bold uppercase tracking-widest text-technical-cyan/70 hover:text-technical-cyan transition-colors bg-technical-cyan/5 px-3 py-1.5 rounded-sm w-fit"
+                >
+                  <Plus size={14} /><span>添加源 URL</span>
+                </button>
+              </div>
+            </div>
           </section>
         ))}
         {groups.length === 0 && (
-          <div className="text-center p-10 text-technical-muted border border-dashed border-technical-border rounded">
-            暂无订阅组，请添加
-          </div>
+          <div className="text-center p-10 text-technical-muted border border-dashed border-technical-border rounded">暂无订阅组，请添加</div>
         )}
       </div>
     </div>

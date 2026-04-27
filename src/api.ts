@@ -5,16 +5,19 @@ import {
 
 // ---------- 类型 ----------
 
-export interface SubscriptionGroup {
-  id: string; title: string; enabled: boolean; filter: string; urls: string[]; updatedAt: string;
-  /** 获取最新订阅URL的接口地址 */
+export interface UrlEntry {
+  url: string;
+  name?: string;
   refreshUrl?: string;
-  /** 请求头（JSON对象） */
   refreshHeaders?: Record<string, string>;
-  /** 提取订阅URL的JSON路径（点分隔），默认 subscribe_url */
   refreshJsonPath?: string;
-  /** 最近一次刷新时间 */
   lastRefreshedAt?: string;
+}
+
+export interface SubscriptionGroup {
+  id: string; title: string; enabled: boolean; filter: string;
+  urls: UrlEntry[];
+  updatedAt: string;
 }
 export interface Template {
   id: string; name: string; content: string; updatedAt: string;
@@ -132,7 +135,9 @@ export const updateSubscription = (id: string, d: Partial<SubscriptionGroup>) =>
 export const deleteSubscription = (id: string) =>
   apiFetch(`/api/subscriptions/${id}`, { method:'DELETE' });
 export const refreshSubscription = (id: string) =>
-  apiFetch<{ ok: boolean; msg: string }>(`/api/subscriptions/${id}/refresh`, { method:'POST' });
+  apiFetch<{ refreshed: number; errors: string[] }>(`/api/subscriptions/${id}/refresh`, { method:'POST' });
+export const refreshUrlEntry = (groupId: string, urlIndex: number) =>
+  apiFetch<{ ok: boolean; url: string }>(`/api/subscriptions/${groupId}/urls/${urlIndex}/refresh`, { method:'POST' });
 
 // ---------- Templates ----------
 
