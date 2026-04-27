@@ -755,25 +755,59 @@ async function fetchSubscriptionUserInfo(entries: UrlEntry[]): Promise<string> {
   return `upload=${upload}; download=${download}; total=${total}; expire=${expire}`;
 }
 
-/** 将 filter 字段（普通正则或高级 JSON）编译为正则字符串，空字符串表示不过滤 */
+/**
+ * JS 引擎版（带 lookahead）——用于前端预览和 worker 内部 JS 过滤。
+ * 普通正则：直接返回；高级 JSON：编译为含 lookahead 的正则。
+ */
 function compileGroupFilter(filter: string): string {
   if (!filter) return '';
   if (!filter.startsWith('{"advanced":true')) return filter;
   try {
     const data = JSON.parse(filter);
     const rules = data.rules || [];
-    const orIncludes = rules.filter((r: any) => r.logic === 'or').map((r: any) => r.value).filter(Boolean);
+    const orIncludes  = rules.filter((r: any) => r.logic === 'or' ).map((r: any) => r.value).filter(Boolean);
     const andIncludes = rules.filter((r: any) => r.logic === 'and').map((r: any) => r.value).filter(Boolean);
     const notExcludes = rules.filter((r: any) => r.logic === 'not').map((r: any) => r.value).filter(Boolean);
     let regex = '^';
-    if (orIncludes.length > 0) regex += `(?=.*(${orIncludes.join('|')}))`;
+    if (orIncludes.length  > 0) regex += `(?=.*(${orIncludes.join('|')}))`;
     for (const andInc of andIncludes) regex += `(?=.*${andInc})`;
     if (notExcludes.length > 0) regex += `(?!.*(${notExcludes.join('|')}))`;
     regex += '.*$';
     return regex === '^.*$' ? '' : regex;
-  } catch {
-    return '';
-  }
+  } catch { return ''; }
+}
+
+/**
+ * Go/RE2 层——正向包含匹配（用于 Mihomo filter-regex 字段）
+ * OR/AND 规则用 | 连接；NOT 规则即 GROUP_EXCLUDE，此处不处理。
+ * 无包含规则时返回空字符串（Mihomo 空字符串 = 匹配全部）。
+ */
+function compileGroupFilterGo(filter: string): string {
+  if (!filter) return '';
+  if (!filter.startsWith('{"advanced":true')) return filter; // 普通正则直接使用
+  try {
+    const data = JSON.parse(filter);
+    const rules = data.rules || [];
+    const positives = rules
+      .filter((r: any) => r.logic === 'or' || r.logic === 'and')
+      .map((r: any) => r.value).filter(Boolean);
+    return positives.length > 0 ? positives.join('|') : '';
+  } catch { return ''; }
+}
+
+/**
+ * Go/RE2 层——排除匹配（用于 Mihomo exclude-filter 字段）
+ * 将所有 NOT 规则用 | 连接输出。
+ */
+function compileGroupExclude(filter: string): string {
+  if (!filter) return '';
+  if (!filter.startsWith('{"advanced":true')) return ''; // 普通正则没有单独的排除部分
+  try {
+    const data = JSON.parse(filter);
+    const rules = data.rules || [];
+    const nots = rules.filter((r: any) => r.logic === 'not').map((r: any) => r.value).filter(Boolean);
+    return nots.length > 0 ? nots.join('|') : '';
+  } catch { return ''; }
 }
 
 /**
@@ -944,11 +978,15 @@ async function renderTemplate(template: string, group: SubscriptionGroup, filter
   // {{URL_ALL}} → 所有 URL 以换行分隔
   output = output.replace(/\{\{URL_ALL\}\}/g, group.urls.map(e => e.url).join('\n'));
 
-  // 通用变量（{{GROUP_FILTER}} 输出编译后的正则字符串）
-  const compiledFilter = compileGroupFilter(group.filter);
+  // 通用变量
+  // {{GROUP_FILTER}}  → Go RE2 兼容的正向匹配正则（用于 filter-regex 字段）
+  // {{GROUP_EXCLUDE}} → Go RE2 列举式排除正则（用于 exclude-filter 字段）
+  const goFilter  = compileGroupFilterGo(group.filter);
+  const goExclude = compileGroupExclude(group.filter);
   output = output
     .replace(/\{\{GROUP_NAME\}\}/g,    group.title)
-    .replace(/\{\{GROUP_FILTER\}\}/g,  compiledFilter)
+    .replace(/\{\{GROUP_FILTER\}\}/g,  goFilter)
+    .replace(/\{\{GROUP_EXCLUDE\}\}/g, goExclude)
     .replace(/\{\{GENERATED_AT\}\}/g,  new Date().toISOString());
 
   return output;
