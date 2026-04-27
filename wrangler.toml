@@ -30,3 +30,7 @@ binding = "KV"
 [[r2_buckets]]
 binding = "ATTACHMENTS"
 bucket_name = "mihomo-attachments"
+
+# 每天 UTC 00:00 自动刷新订阅 URL
+[[triggers]]
+crons = ["0 0 * * *"]

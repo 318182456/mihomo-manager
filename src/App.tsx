@@ -26,6 +26,10 @@ import {
   LogIn,
   KeyRound,
   ShieldCheck,
+  RefreshCw,
+  ChevronDown,
+  Clock,
+  AlertTriangle,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import * as api from './api';
@@ -408,6 +412,9 @@ function SubscriptionsView() {
   const [groups, setGroups] = useState<api.SubscriptionGroup[]>([]);
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState<string | null>(null);
+  const [refreshingId, setRefreshingId] = useState<string | null>(null);
+  const [refreshMsg, setRefreshMsg] = useState<{ id: string; ok: boolean; msg: string } | null>(null);
+  const [expandedRefresh, setExpandedRefresh] = useState<string | null>(null);
 
   const loadData = async () => {
     try {
@@ -443,6 +450,20 @@ function SubscriptionsView() {
       loadData();
     } catch (e) {
       alert('删除失败');
+    }
+  };
+
+  const handleRefreshGroup = async (group: api.SubscriptionGroup) => {
+    setRefreshingId(group.id);
+    setRefreshMsg(null);
+    try {
+      const result = await api.refreshSubscription(group.id);
+      setRefreshMsg({ id: group.id, ok: true, msg: `已更新: ${result.msg}` });
+      loadData();
+    } catch (e: any) {
+      setRefreshMsg({ id: group.id, ok: false, msg: e.message || '刷新失败' });
+    } finally {
+      setRefreshingId(null);
     }
   };
 
@@ -522,6 +543,100 @@ function SubscriptionsView() {
                   placeholder="留空则不筛选"
                   className="flex-1 bg-black/40 border border-technical-border rounded-sm px-3 py-1 font-mono text-xs text-technical-cyan focus:outline-none focus:border-technical-cyan/30 transition-all"
                 />
+             </div>
+
+             {/* 刷新配置区 */}
+             <div className="border-b border-technical-border/50">
+               <button
+                 onClick={() => setExpandedRefresh(expandedRefresh === group.id ? null : group.id)}
+                 className="w-full flex items-center justify-between px-4 py-3 text-[10px] font-display font-bold uppercase tracking-widest text-technical-muted hover:text-technical-cyan hover:bg-white/5 transition-all"
+               >
+                 <div className="flex items-center gap-2">
+                   <RefreshCw size={13} />
+                   <span>自动更新配置</span>
+                   {group.refreshUrl && (
+                     <span className="px-1.5 py-0.5 bg-technical-cyan/10 text-technical-cyan rounded text-[9px]">已启用</span>
+                   )}
+                   {group.lastRefreshedAt && (
+                     <span className="flex items-center gap-1 text-zinc-600 text-[9px] font-normal normal-case tracking-normal">
+                       <Clock size={9} />
+                       {new Date(group.lastRefreshedAt).toLocaleString('zh-CN')}
+                     </span>
+                   )}
+                 </div>
+                 <ChevronDown size={13} className={`transition-transform ${expandedRefresh === group.id ? 'rotate-180' : ''}`} />
+               </button>
+
+               {expandedRefresh === group.id && (
+                 <div className="px-4 pb-4 space-y-3 bg-black/30">
+                   <div className="text-[9px] font-mono text-zinc-600 pt-2">每天 UTC 00:00 自动请求以下接口，将响应中的订阅URL覆写到 urls[0]</div>
+
+                   <div className="space-y-1">
+                     <label className="block text-[10px] font-display text-technical-muted uppercase tracking-widest">接口地址 (refreshUrl)</label>
+                     <input
+                       type="text"
+                       value={group.refreshUrl ?? ''}
+                       onChange={(e) => setGroups(groups.map(g => g.id === group.id ? { ...g, refreshUrl: e.target.value } : g))}
+                       onBlur={(e) => handleUpdateGroup(group.id, { refreshUrl: e.target.value || undefined })}
+                       placeholder="https://example.com/api/getSubscribe"
+                       className="w-full bg-black/40 border border-technical-border rounded-sm px-3 py-1.5 font-mono text-xs text-gray-300 focus:outline-none focus:border-technical-cyan/50 transition-all"
+                     />
+                   </div>
+
+                   <div className="space-y-1">
+                     <label className="block text-[10px] font-display text-technical-muted uppercase tracking-widest">请求头 JSON (refreshHeaders)</label>
+                     <textarea
+                       rows={3}
+                       value={group.refreshHeaders ? JSON.stringify(group.refreshHeaders, null, 2) : ''}
+                       onChange={(e) => {
+                         try {
+                           const h = e.target.value ? JSON.parse(e.target.value) : undefined;
+                           setGroups(groups.map(g => g.id === group.id ? { ...g, refreshHeaders: h } : g));
+                         } catch { /* 输入中，暂不 parse */ }
+                       }}
+                       onBlur={(e) => {
+                         try {
+                           const h = e.target.value ? JSON.parse(e.target.value) : undefined;
+                           handleUpdateGroup(group.id, { refreshHeaders: h });
+                         } catch { alert('请求头 JSON 格式错误'); }
+                       }}
+                       placeholder={'{\n  "authorization": "Bearer your-token"\n}'}
+                       className="w-full bg-black/40 border border-technical-border rounded-sm px-3 py-1.5 font-mono text-xs text-gray-300 focus:outline-none focus:border-technical-cyan/50 transition-all resize-none"
+                     />
+                   </div>
+
+                   <div className="space-y-1">
+                     <label className="block text-[10px] font-display text-technical-muted uppercase tracking-widest">响应字段路径 (refreshJsonPath)</label>
+                     <input
+                       type="text"
+                       value={group.refreshJsonPath ?? ''}
+                       onChange={(e) => setGroups(groups.map(g => g.id === group.id ? { ...g, refreshJsonPath: e.target.value } : g))}
+                       onBlur={(e) => handleUpdateGroup(group.id, { refreshJsonPath: e.target.value || undefined })}
+                       placeholder="subscribe_url  或  data.subscribe_url"
+                       className="w-full bg-black/40 border border-technical-border rounded-sm px-3 py-1.5 font-mono text-xs text-gray-300 focus:outline-none focus:border-technical-cyan/50 transition-all"
+                     />
+                   </div>
+
+                   <div className="flex items-center gap-3 pt-1">
+                     <button
+                       onClick={() => handleRefreshGroup(group)}
+                       disabled={!group.refreshUrl || refreshingId === group.id}
+                       className="technical-button-primary py-1.5 px-4 text-xs gap-2 disabled:opacity-40"
+                     >
+                       <RefreshCw size={13} className={refreshingId === group.id ? 'animate-spin' : ''} />
+                       <span>{refreshingId === group.id ? '刷新中...' : '立即刷新'}</span>
+                     </button>
+                     {refreshMsg?.id === group.id && (
+                       <div className={`flex items-center gap-1.5 text-xs font-mono ${
+                         refreshMsg.ok ? 'text-green-400' : 'text-red-400'
+                       }`}>
+                         {refreshMsg.ok ? <CheckCircle2 size={13} /> : <AlertTriangle size={13} />}
+                         <span className="truncate max-w-xs">{refreshMsg.msg}</span>
+                       </div>
+                     )}
+                   </div>
+                 </div>
+               )}
              </div>
 
              <div className="flex flex-col bg-black/20">

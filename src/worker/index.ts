@@ -1,4 +1,5 @@
 /// <reference types="@cloudflare/workers-types" />
+/// <reference types="@cloudflare/workers-types/2023-07-01" />
 import {
   generateRegistrationOptions,
   verifyRegistrationResponse,
@@ -153,6 +154,14 @@ interface StoredPasskey {
 
 export interface SubscriptionGroup {
   id: string; title: string; enabled: boolean; filter: string; urls: string[]; updatedAt: string;
+  /** 用于自动获取最新订阅URL的接口地址，留空则不自动更新 */
+  refreshUrl?: string;
+  /** 传给 refreshUrl 的自定义请求头，JSON 对象格式 */
+  refreshHeaders?: Record<string, string>;
+  /** 从 refreshUrl 响应中提取订阅链接的 JSON 路径（点分隔），默认 subscribe_url */
+  refreshJsonPath?: string;
+  /** 最近一次自动刷新时间 */
+  lastRefreshedAt?: string;
 }
 export interface Template {
   id: string; name: string; content: string; updatedAt: string;
@@ -228,7 +237,80 @@ async function getOrSeedTemplates(r2: R2Bucket): Promise<Template[]> {
 
 // ---------- Worker 主入口 ----------
 
+// ---------- 订阅 URL 自动刷新 ----------
+
+/**
+ * 从 refreshUrl 接口拉取最新订阅链接并更新至订阅组
+ * refreshJsonPath 支持点分路径，如 "data.subscribe_url"
+ */
+async function refreshSubscriptionGroup(group: SubscriptionGroup, kv: KVNamespace): Promise<{ ok: boolean; msg: string }> {
+  if (!group.refreshUrl) return { ok: false, msg: '未配置 refreshUrl' };
+
+  let resp: Response;
+  try {
+    resp = await fetch(group.refreshUrl, {
+      headers: {
+        'Accept': 'application/json',
+        ...(group.refreshHeaders ?? {}),
+      },
+    });
+  } catch (e) {
+    return { ok: false, msg: `请求失败: ${String(e)}` };
+  }
+
+  if (!resp.ok) return { ok: false, msg: `HTTP ${resp.status}` };
+
+  let json: any;
+  try { json = await resp.json(); } catch { return { ok: false, msg: '响应非 JSON' }; }
+
+  // 按 refreshJsonPath 取值（默认尝试常见字段）
+  const path = group.refreshJsonPath || 'subscribe_url';
+  const parts = path.split('.');
+  let val: any = json;
+  for (const p of parts) {
+    if (val == null || typeof val !== 'object') { val = undefined; break; }
+    val = val[p];
+  }
+
+  // 若路径取不到，自动探测常见字段
+  if (!val) {
+    val = json.subscribe_url ?? json.sub_url ?? json.url ?? json.link
+      ?? json.data?.subscribe_url ?? json.data?.sub_url ?? json.data?.url;
+  }
+
+  if (!val || typeof val !== 'string') {
+    return { ok: false, msg: `无法从响应中提取订阅URL（路径: ${path}）` };
+  }
+
+  // 更新 KV
+  const raw = await kv.get('subscriptions');
+  const list: SubscriptionGroup[] = raw ? JSON.parse(raw) : [];
+  const idx = list.findIndex(s => s.id === group.id);
+  if (idx === -1) return { ok: false, msg: '订阅组已不存在' };
+
+  // 替换（或追加）该 URL，保留其他 URL 不变
+  // 约定：refreshUrl 管理的链接在 urls[0]，其余手动维护
+  const newUrls = [...list[idx].urls];
+  if (newUrls.length === 0) {
+    newUrls.push(val);
+  } else {
+    newUrls[0] = val;  // 始终覆写第一条
+  }
+  list[idx] = { ...list[idx], urls: newUrls, lastRefreshedAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+  await kv.put('subscriptions', JSON.stringify(list));
+
+  return { ok: true, msg: val };
+}
+
 export default {
+  // ---------- Cron 定时任务（每天 UTC 00:00）----------
+  async scheduled(_event: ScheduledEvent, env: Env, _ctx: ExecutionContext): Promise<void> {
+    const raw = await env.KV.get('subscriptions');
+    const list: SubscriptionGroup[] = raw ? JSON.parse(raw) : [];
+    const targets = list.filter(s => s.enabled && s.refreshUrl);
+    await Promise.allSettled(targets.map(g => refreshSubscriptionGroup(g, env.KV)));
+  },
+
   async fetch(request: Request, env: Env): Promise<Response> {
     const { pathname } = new URL(request.url);
 
@@ -423,8 +505,14 @@ async function handleAPI(request: Request, env: Env, pathname: string): Promise<
   const [resource, id = null] = parts;
   const method = request.method;
   try {
+    const subPath = parts.slice(1).join('/');
     switch (resource) {
-      case 'subscriptions': return handleSubscriptions(request, env.KV, method, id);
+      case 'subscriptions':
+        // POST /api/subscriptions/:id/refresh  手动刷新单个订阅
+        if (method === 'POST' && id && subPath === 'refresh') {
+          return handleSubscriptionRefresh(id, env.KV);
+        }
+        return handleSubscriptions(request, env.KV, method, id);
       case 'templates':     return handleTemplates(request, env.ATTACHMENTS, method, id);
       case 'links':         return handleLinks(request, env.KV, method, id);
       case 'dashboard':     return handleDashboard(env);
@@ -463,6 +551,18 @@ async function handleSubscriptions(req: Request, kv: KVNamespace, method: string
     return ok({ ok: true });
   }
   return err('Method Not Allowed', 405);
+}
+
+// ---------- 手动刷新单个订阅 ----------
+
+async function handleSubscriptionRefresh(id: string, kv: KVNamespace): Promise<Response> {
+  const raw = await kv.get('subscriptions');
+  const list: SubscriptionGroup[] = raw ? JSON.parse(raw) : [];
+  const group = list.find(s => s.id === id);
+  if (!group) return err404();
+  if (!group.refreshUrl) return err('该订阅组未配置 refreshUrl', 400);
+  const result = await refreshSubscriptionGroup(group, kv);
+  return result.ok ? ok(result) : err(result.msg, 502);
 }
 
 // ---------- 模板 CRUD (R2 对象存储) ----------
