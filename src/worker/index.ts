@@ -505,14 +505,15 @@ async function handleAPI(request: Request, env: Env, pathname: string): Promise<
   const [resource, id = null] = parts;
   const method = request.method;
   try {
-    const subPath = parts.slice(1).join('/');
+    const action = parts[2] ?? null;
     switch (resource) {
       case 'subscriptions':
-        // POST /api/subscriptions/:id/refresh  手动刷新单个订阅
-        if (method === 'POST' && id && subPath === 'refresh') {
+        // POST /api/subscriptions/:id/refresh
+        if (method === 'POST' && id && action === 'refresh') {
           return handleSubscriptionRefresh(id, env.KV);
         }
         return handleSubscriptions(request, env.KV, method, id);
+
       case 'templates':     return handleTemplates(request, env.ATTACHMENTS, method, id);
       case 'links':         return handleLinks(request, env.KV, method, id);
       case 'dashboard':     return handleDashboard(env);
