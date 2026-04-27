@@ -558,7 +558,10 @@ function SubscriptionsView() {
                   <div className="text-[10px] text-technical-muted mb-2 border-b border-technical-border/30 pb-1 flex justify-between">
                     <span>总计 {proxyCache[group.id].length} 个节点</span>
                     <span>
-                      已过滤出 {proxyCache[group.id].filter(p => !group.filter || new RegExp(group.filter).test(p)).length} 个
+                      已过滤出 {proxyCache[group.id].filter(p => {
+                        try { return !group.filter || new RegExp(group.filter).test(p); }
+                        catch { return false; }
+                      }).length} 个
                     </span>
                   </div>
                   <div className="flex flex-wrap gap-1.5">
