@@ -707,12 +707,21 @@ function SubscriptionsView() {
                       {entry.lastRefreshedAt && (
                         <Clock size={11} className="text-zinc-600 shrink-0" title={`最近刷新: ${new Date(entry.lastRefreshedAt).toLocaleString('zh-CN')}`} />
                       )}
-                      {/* 名称 */}
+                      {/* provider 名称 */}
                       <input type="text" value={entry.name ?? ''}
                         onChange={(e) => setUrlField(group.id, i, 'name', e.target.value)}
                         onBlur={() => saveUrls(group.id)}
                         placeholder="名称"
+                        title="Provider 名称（对应模板 use: [name]）"
                         className="w-20 bg-zinc-900 border border-technical-border/50 rounded-sm px-2 py-0.5 font-mono text-[11px] text-technical-cyan focus:outline-none focus:border-technical-cyan/50 shrink-0"
+                      />
+                      {/* proxy-group 分组名 */}
+                      <input type="text" value={entry.proxyGroup ?? ''}
+                        onChange={(e) => setUrlField(group.id, i, 'proxyGroup', e.target.value)}
+                        onBlur={() => saveUrls(group.id)}
+                        placeholder="分组名"
+                        title="所属 proxy-group 名（对应模板 {{URL_GROUPS}}）"
+                        className="w-20 bg-zinc-900 border border-amber-700/40 rounded-sm px-2 py-0.5 font-mono text-[11px] text-amber-400 focus:outline-none focus:border-amber-500/60 shrink-0"
                       />
                       {/* 展开刷新配置 */}
                       <button

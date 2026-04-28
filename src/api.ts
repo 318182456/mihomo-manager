@@ -8,6 +8,8 @@ import {
 export interface UrlEntry {
   url: string;
   name?: string;
+  /** 归属的 proxy-group 名，用于模板 {{URL_GROUPS}} 动态生成分组 */
+  proxyGroup?: string;
   refreshUrl?: string;
   refreshHeaders?: Record<string, string>;
   refreshJsonPath?: string;

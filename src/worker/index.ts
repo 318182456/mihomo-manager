@@ -158,6 +158,8 @@ export interface UrlEntry {
   url: string;
   /** provider 名称，用于模板 {{PROVIDERS}} 注入，默认 p1/p2/... */
   name?: string;
+  /** 归属的 proxy-group 名，用于模板 {{URL_GROUPS}} 动态生成分组 */
+  proxyGroup?: string;
   /** 自动获取最新URL的接口地址 */
   refreshUrl?: string;
   /** 传给 refreshUrl 的请求头 */
@@ -968,6 +970,39 @@ async function renderTemplate(template: string, group: SubscriptionGroup, filter
   if (output.includes('{{PROXY_NAMES}}')) {
     const namesYaml = filteredProxies.map(p => `  - "${p.name}"`).join('\n');
     output = output.replace(/\{\{PROXY_NAMES\}\}/g, namesYaml);
+  }
+
+  // {{URL_GROUPS}} → 按 UrlEntry.proxyGroup 聚合，动态生成 url-test proxy-group 块
+  if (output.includes('# {{URL_GROUPS}}') || output.includes('{{URL_GROUPS}}')) {
+    // 按 proxyGroup 收集 provider names（保持首次出现顺序）
+    const groupMap = new Map<string, string[]>();
+    for (const entry of group.urls) {
+      if (!entry.proxyGroup) continue;
+      const providerName = entry.name;
+      if (!providerName) continue;
+      if (!groupMap.has(entry.proxyGroup)) groupMap.set(entry.proxyGroup, []);
+      groupMap.get(entry.proxyGroup)!.push(providerName);
+    }
+    const groupBlocks = Array.from(groupMap.entries()).map(([groupName, providers]) => {
+      const useList = providers.join(', ');
+      return [
+        `  - name: ${groupName}`,
+        `    type: url-test`,
+        `    use: [${useList}]`,
+        `    tolerance: 50`,
+        `    url: https://www.gstatic.com/generate_204`,
+        `    interval: 300`,
+      ].join('\n');
+    }).join('\n\n');
+    output = output
+      .replace(/^\s*#\s*\{\{URL_GROUPS\}\}\s*$/m, groupBlocks || '  # (无已配置的分组)')
+      .replace(/\{\{URL_GROUPS\}\}/g, groupBlocks || '  # (无已配置的分组)');
+  }
+
+  // {{URL_GROUP_NAMES}} → 所有 proxyGroup 名称（去重，逗号分隔，用于 proxies 列表）
+  if (output.includes('{{URL_GROUP_NAMES}}')) {
+    const names = [...new Set(group.urls.map(e => e.proxyGroup).filter(Boolean))];
+    output = output.replace(/\{\{URL_GROUP_NAMES\}\}/g, names.join(','));
   }
 
   // {{URL_0}}, {{URL_1}}, ... → 对应下标 URL
