@@ -770,6 +770,70 @@ function SubscriptionsView() {
                             className="w-full bg-black/40 border border-technical-border rounded-sm px-2.5 py-1.5 font-mono text-xs text-gray-300 focus:outline-none focus:border-technical-cyan/50"
                           />
                         </div>
+                        {/* 分组图标选择 */}
+                        <div>
+                          <label className="block text-[9px] font-display text-technical-muted uppercase tracking-widest mb-1">
+                            分组图标 (icon - 选填，仅选文件名)
+                          </label>
+                          <div className="flex items-center gap-2">
+                            {/* 图标预览 */}
+                            <div className="w-7 h-7 bg-zinc-900 border border-technical-border/50 rounded-sm flex items-center justify-center shrink-0">
+                              {entry.icon ? (
+                                <img
+                                  src={`https://gh-proxy.com/raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/${entry.icon}.png`}
+                                  alt={entry.icon}
+                                  className="w-5 h-5 object-contain"
+                                  onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                                />
+                              ) : (
+                                <span className="text-zinc-700 text-[10px]">—</span>
+                              )}
+                            </div>
+                            {/* 下拉选择 */}
+                            <select
+                              value={entry.icon ?? ''}
+                              onChange={(e) => {
+                                setUrlField(group.id, i, 'icon', e.target.value || undefined);
+                                saveUrls(group.id);
+                              }}
+                              className="flex-1 bg-black/40 border border-amber-700/40 rounded-sm px-2 py-1.5 font-mono text-xs text-amber-400 focus:outline-none focus:border-amber-500/60"
+                            >
+                              <option value="">-- 不设置图标 --</option>
+                              <optgroup label="通用">
+                                <option value="Auto">Auto（自动）</option>
+                                <option value="Proxy">Proxy（代理）</option>
+                                <option value="Global">Global（全局）</option>
+                                <option value="Final">Final（兜底）</option>
+                                <option value="Server">Server（服务器）</option>
+                                <option value="Speedtest">Speedtest（测速）</option>
+                              </optgroup>
+                              <optgroup label="应用">
+                                <option value="ChatGPT">ChatGPT / AI</option>
+                                <option value="Google_Search">Google</option>
+                                <option value="YouTube">YouTube</option>
+                                <option value="Netflix">Netflix</option>
+                                <option value="Spotify">Spotify</option>
+                                <option value="Telegram">Telegram</option>
+                                <option value="Twitter">Twitter</option>
+                                <option value="Github">Github</option>
+                                <option value="bilibili">哔哩哔哩</option>
+                                <option value="Bahamut">巴哈姆特</option>
+                              </optgroup>
+                              <optgroup label="地区">
+                                <option value="HK">香港 HK</option>
+                                <option value="TW">台湾 TW</option>
+                                <option value="JP">日本 JP</option>
+                                <option value="US">美国 US</option>
+                                <option value="SG">新加坡 SG</option>
+                                <option value="DE">德国 DE</option>
+                                <option value="China_Map">中国大陆</option>
+                              </optgroup>
+                            </select>
+                          </div>
+                          <p className="mt-1 text-[9px] font-mono text-zinc-600 break-all">
+                            前缀: https://gh-proxy.com/raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/
+                          </p>
+                        </div>
                         <div className="flex items-center gap-3 pt-0.5">
                           <button
                             onClick={() => handleUrlRefresh(group.id, i)}

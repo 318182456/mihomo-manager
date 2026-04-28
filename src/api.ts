@@ -10,6 +10,8 @@ export interface UrlEntry {
   name?: string;
   /** 归属的 proxy-group 名，用于模板 {{URL_GROUPS}} 动态生成分组 */
   proxyGroup?: string;
+  /** 分组图标文件名（不含扩展名），如 Auto、Speedtest，前缀固定为 Qure/IconSet/Color/ */
+  icon?: string;
   refreshUrl?: string;
   refreshHeaders?: Record<string, string>;
   refreshJsonPath?: string;

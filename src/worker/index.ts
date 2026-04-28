@@ -160,6 +160,8 @@ export interface UrlEntry {
   name?: string;
   /** 归属的 proxy-group 名，用于模板 {{URL_GROUPS}} 动态生成分组 */
   proxyGroup?: string;
+  /** 分组图标文件名（不含扩展名），如 Auto、Speedtest，前缀固定为 Qure/IconSet/Color/ */
+  icon?: string;
   /** 自动获取最新URL的接口地址 */
   refreshUrl?: string;
   /** 传给 refreshUrl 的请求头 */
@@ -975,16 +977,21 @@ async function renderTemplate(template: string, group: SubscriptionGroup, filter
   // {{URL_GROUPS}} → 按 UrlEntry.proxyGroup 聚合，动态生成 url-test proxy-group 块
   // 无 proxyGroup 的条目默认归入 "other" 分组
   if (output.includes('# {{URL_GROUPS}}') || output.includes('{{URL_GROUPS}}')) {
-    const groupMap = new Map<string, string[]>();
+    const ICON_BASE = 'https://gh-proxy.com/raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/';
+    // 按 proxyGroup 收集：providers 列表 + 分组图标（取该组第一个有 icon 的条目）
+    const groupMap = new Map<string, { providers: string[]; icon?: string }>();
     for (const entry of group.urls) {
       const providerName = entry.name;
       if (!providerName) continue;                          // 无 name 则跳过
       const pgName = entry.proxyGroup || 'other';           // 默认 other
-      if (!groupMap.has(pgName)) groupMap.set(pgName, []);
-      groupMap.get(pgName)!.push(providerName);
+      if (!groupMap.has(pgName)) groupMap.set(pgName, { providers: [], icon: undefined });
+      const info = groupMap.get(pgName)!;
+      info.providers.push(providerName);
+      if (!info.icon && entry.icon) info.icon = entry.icon; // 取第一个有图标的
     }
-    const groupBlocks = Array.from(groupMap.entries()).map(([groupName, providers]) => {
-      const useList = providers.join(', ');
+    const groupBlocks = Array.from(groupMap.entries()).map(([groupName, info]) => {
+      const useList = info.providers.join(', ');
+      const iconLine = `\n    icon: ${ICON_BASE}${info.icon ?? 'Server'}.png`;
       return [
         `  - name: ${groupName}`,
         `    type: url-test`,
@@ -992,7 +999,7 @@ async function renderTemplate(template: string, group: SubscriptionGroup, filter
         `    tolerance: 50`,
         `    url: https://www.gstatic.com/generate_204`,
         `    interval: 300`,
-      ].join('\n');
+      ].join('\n') + iconLine;
     }).join('\n\n');
     // 替换时显式补 \n，避免 CRLF 文件的 \r 被 \s*$ 消耗导致空行丢失
     const replacement = groupBlocks ? '\n' + groupBlocks + '\n' : '  # (无已配置的分组)';
