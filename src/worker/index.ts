@@ -973,15 +973,15 @@ async function renderTemplate(template: string, group: SubscriptionGroup, filter
   }
 
   // {{URL_GROUPS}} → 按 UrlEntry.proxyGroup 聚合，动态生成 url-test proxy-group 块
+  // 无 proxyGroup 的条目默认归入 "other" 分组
   if (output.includes('# {{URL_GROUPS}}') || output.includes('{{URL_GROUPS}}')) {
-    // 按 proxyGroup 收集 provider names（保持首次出现顺序）
     const groupMap = new Map<string, string[]>();
     for (const entry of group.urls) {
-      if (!entry.proxyGroup) continue;
       const providerName = entry.name;
-      if (!providerName) continue;
-      if (!groupMap.has(entry.proxyGroup)) groupMap.set(entry.proxyGroup, []);
-      groupMap.get(entry.proxyGroup)!.push(providerName);
+      if (!providerName) continue;                          // 无 name 则跳过
+      const pgName = entry.proxyGroup || 'other';           // 默认 other
+      if (!groupMap.has(pgName)) groupMap.set(pgName, []);
+      groupMap.get(pgName)!.push(providerName);
     }
     const groupBlocks = Array.from(groupMap.entries()).map(([groupName, providers]) => {
       const useList = providers.join(', ');
@@ -994,14 +994,19 @@ async function renderTemplate(template: string, group: SubscriptionGroup, filter
         `    interval: 300`,
       ].join('\n');
     }).join('\n\n');
+    // 替换时显式补 \n，避免 CRLF 文件的 \r 被 \s*$ 消耗导致空行丢失
+    const replacement = groupBlocks ? '\n' + groupBlocks + '\n' : '  # (无已配置的分组)';
     output = output
-      .replace(/^\s*#\s*\{\{URL_GROUPS\}\}\s*$/m, groupBlocks || '  # (无已配置的分组)')
-      .replace(/\{\{URL_GROUPS\}\}/g, groupBlocks || '  # (无已配置的分组)');
+      .replace(/^\s*#\s*\{\{URL_GROUPS\}\}\s*$/m, replacement)
+      .replace(/\{\{URL_GROUPS\}\}/g, replacement);
   }
 
-  // {{URL_GROUP_NAMES}} → 所有 proxyGroup 名称（去重，逗号分隔，用于 proxies 列表）
+  // {{URL_GROUP_NAMES}} → 所有 proxyGroup 名称（去重，保持顺序，包含 other）
   if (output.includes('{{URL_GROUP_NAMES}}')) {
-    const names = [...new Set(group.urls.map(e => e.proxyGroup).filter(Boolean))];
+    const names = [...new Set(group.urls
+      .filter(e => e.name)                                  // 只含有 name 的条目
+      .map(e => e.proxyGroup || 'other')                    // 无 proxyGroup 默认 other
+    )];
     output = output.replace(/\{\{URL_GROUP_NAMES\}\}/g, names.join(','));
   }
 
