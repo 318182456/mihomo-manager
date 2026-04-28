@@ -793,8 +793,13 @@ function SubscriptionsView() {
                             <select
                               value={entry.icon ?? ''}
                               onChange={(e) => {
-                                setUrlField(group.id, i, 'icon', e.target.value || undefined);
-                                saveUrls(group.id);
+                                const newIcon = e.target.value || undefined;
+                                // 直接用最新值构造 urls，绕开 React 异步 state 时序
+                                const newUrls = group.urls.map((u, j) =>
+                                  j === i ? { ...u, icon: newIcon } : u
+                                );
+                                setGroups(groups.map(g => g.id !== group.id ? g : { ...g, urls: newUrls }));
+                                handleUpdateGroup(group.id, { urls: newUrls });
                               }}
                               className="flex-1 bg-black/40 border border-amber-700/40 rounded-sm px-2 py-1.5 font-mono text-xs text-amber-400 focus:outline-none focus:border-amber-500/60"
                             >
