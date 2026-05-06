@@ -6,13 +6,13 @@
   --font-display: "Space Grotesk", sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
 
-  /* 主题色（暗色模式） */
-  --color-technical-bg: #09090b; /* zinc-950 */
-  --color-technical-surface: #18181b; /* zinc-900 */
-  --color-technical-border: #27272a; /* zinc-800 */
-  --color-technical-cyan: #06b6d4; /* cyan-500 */
-  --color-technical-cyan-dim: rgba(6, 182, 212, 0.1);
-  --color-technical-muted: #a1a1aa; /* zinc-400 */
+  /* 主题色（暗色模式 - Dracula 配色） */
+  --color-technical-bg: #21222c; /* Dracula background darker */
+  --color-technical-surface: #282a36; /* Dracula default background */
+  --color-technical-border: #44475a; /* Dracula current line / selection */
+  --color-technical-cyan: #8be9fd; /* Dracula cyan */
+  --color-technical-cyan-dim: rgba(139, 233, 253, 0.15);
+  --color-technical-muted: #6272a4; /* Dracula comment */
 }
 
 @layer base {
@@ -21,7 +21,7 @@
   }
   
   body {
-    @apply bg-technical-bg text-zinc-300 font-sans antialiased selection:bg-technical-cyan/30;
+    @apply bg-technical-bg text-[#f8f8f2] font-sans antialiased selection:bg-technical-cyan/30;
   }
 
   /* 隐藏所有元素的横纵滚动条，但保留滚动功能 */
@@ -38,21 +38,21 @@
 }
 
 .glow-cyan {
-  box-shadow: 0 0 15px rgba(6, 182, 212, 0.3);
+  box-shadow: 0 0 15px rgba(139, 233, 253, 0.3);
 }
 
 .technical-card {
-  @apply bg-technical-surface border border-technical-border rounded-xl overflow-hidden transition-all duration-300 hover:border-technical-cyan/30 hover:shadow-lg hover:shadow-technical-cyan/5;
+  @apply bg-technical-surface border border-technical-border rounded-xl overflow-hidden transition-all duration-300 hover:border-technical-cyan/50 hover:shadow-lg hover:shadow-technical-cyan/10;
 }
 
 .technical-input {
-  @apply bg-zinc-950 border border-technical-border rounded-lg px-3 py-1.5 font-mono text-sm text-zinc-300 focus:outline-none focus:border-technical-cyan focus:ring-1 focus:ring-technical-cyan/50 transition-all;
+  @apply bg-[#21222c] border border-technical-border rounded-lg px-3 py-1.5 font-mono text-sm text-[#f8f8f2] focus:outline-none focus:border-technical-cyan focus:ring-1 focus:ring-technical-cyan/50 transition-all;
 }
 
 .technical-button-primary {
-  @apply font-display text-xs uppercase tracking-widest px-4 py-2 rounded-lg transition-all active:scale-95 flex items-center justify-center gap-2 outline-none bg-technical-cyan text-zinc-950 hover:bg-cyan-400 hover:shadow-[0_0_20px_rgba(6,182,212,0.4)];
+  @apply font-display text-xs uppercase tracking-widest px-4 py-2 rounded-lg transition-all active:scale-95 flex items-center justify-center gap-2 outline-none bg-technical-cyan text-[#282a36] font-bold hover:brightness-110 hover:shadow-[0_0_20px_rgba(139,233,253,0.4)];
 }
 
 .technical-button-outline {
-  @apply font-display text-xs uppercase tracking-widest px-4 py-2 rounded-lg transition-all active:scale-95 flex items-center justify-center gap-2 outline-none border border-technical-border text-zinc-400 hover:border-technical-cyan hover:text-technical-cyan hover:bg-technical-cyan/10;
+  @apply font-display text-xs uppercase tracking-widest px-4 py-2 rounded-lg transition-all active:scale-95 flex items-center justify-center gap-2 outline-none border border-technical-border text-technical-muted hover:border-technical-cyan hover:text-technical-cyan hover:bg-technical-cyan/10;
 }
