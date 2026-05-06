@@ -6,27 +6,13 @@
   --font-display: "Space Grotesk", sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
 
-  /* 主题色（亮色模式） */
-  --color-technical-bg: #f8fafc;
-  --color-technical-surface: #ffffff;
-  --color-technical-border: #e2e8f0;
-  --color-technical-cyan: #0284c7;
-  --color-technical-cyan-dim: rgba(2, 132, 199, 0.1);
-  --color-technical-muted: #64748b;
-
-  /* 反转 App.tsx 中硬编码的暗色变量为亮色 */
-  --color-black: #ffffff;
-  --color-white: #0f172a;
-  
-  --color-zinc-950: #ffffff;
-  --color-zinc-900: #f1f5f9;
-  --color-zinc-800: #e2e8f0;
-  --color-zinc-700: #cbd5e1;
-  --color-zinc-600: #94a3b8;
-  
-  --color-gray-400: #475569;
-  --color-gray-300: #334155;
-  --color-gray-200: #1e293b;
+  /* 主题色（暗色模式） */
+  --color-technical-bg: #09090b; /* zinc-950 */
+  --color-technical-surface: #18181b; /* zinc-900 */
+  --color-technical-border: #27272a; /* zinc-800 */
+  --color-technical-cyan: #06b6d4; /* cyan-500 */
+  --color-technical-cyan-dim: rgba(6, 182, 212, 0.1);
+  --color-technical-muted: #a1a1aa; /* zinc-400 */
 }
 
 @layer base {
@@ -35,7 +21,7 @@
   }
   
   body {
-    @apply bg-technical-bg text-gray-200 font-sans antialiased selection:bg-technical-cyan/30;
+    @apply bg-technical-bg text-zinc-300 font-sans antialiased selection:bg-technical-cyan/30;
   }
 
   /* 隐藏所有元素的横纵滚动条，但保留滚动功能 */
@@ -52,22 +38,21 @@
 }
 
 .glow-cyan {
-  box-shadow: 0 0 15px rgba(0, 240, 255, 0.15);
+  box-shadow: 0 0 15px rgba(6, 182, 212, 0.3);
 }
 
 .technical-card {
-  @apply bg-technical-surface border border-technical-border rounded-sm overflow-hidden transition-all duration-200;
+  @apply bg-technical-surface border border-technical-border rounded-xl overflow-hidden transition-all duration-300 hover:border-technical-cyan/30 hover:shadow-lg hover:shadow-technical-cyan/5;
 }
 
 .technical-input {
-  @apply bg-zinc-900 border border-technical-border rounded-sm px-3 py-1.5 font-mono text-sm focus:outline-none focus:border-technical-cyan focus:ring-1 focus:ring-technical-cyan/50 transition-all;
+  @apply bg-zinc-950 border border-technical-border rounded-lg px-3 py-1.5 font-mono text-sm text-zinc-300 focus:outline-none focus:border-technical-cyan focus:ring-1 focus:ring-technical-cyan/50 transition-all;
 }
 
 .technical-button-primary {
-  @apply font-display text-xs uppercase tracking-widest px-4 py-2 rounded-sm transition-all active:scale-95 flex items-center justify-center gap-2 outline-none bg-technical-cyan text-zinc-950 hover:bg-cyan-300;
-  box-shadow: 0 0 15px rgba(0, 240, 255, 0.15);
+  @apply font-display text-xs uppercase tracking-widest px-4 py-2 rounded-lg transition-all active:scale-95 flex items-center justify-center gap-2 outline-none bg-technical-cyan text-zinc-950 hover:bg-cyan-400 hover:shadow-[0_0_20px_rgba(6,182,212,0.4)];
 }
 
 .technical-button-outline {
-  @apply font-display text-xs uppercase tracking-widest px-4 py-2 rounded-sm transition-all active:scale-95 flex items-center justify-center gap-2 outline-none border border-technical-border text-gray-400 hover:border-technical-cyan hover:text-technical-cyan;
+  @apply font-display text-xs uppercase tracking-widest px-4 py-2 rounded-lg transition-all active:scale-95 flex items-center justify-center gap-2 outline-none border border-technical-border text-zinc-400 hover:border-technical-cyan hover:text-technical-cyan hover:bg-technical-cyan/10;
 }

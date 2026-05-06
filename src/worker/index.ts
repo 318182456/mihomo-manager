@@ -296,18 +296,25 @@ async function fetchAndExtractUrl(entry: UrlEntry): Promise<{ ok: boolean; url?:
 
 /** 批量刷新一个订阅组内所有配置了 refreshUrl 的 URL 条目 */
 async function refreshGroupUrls(groupId: string, kv: KVNamespace): Promise<{ refreshed: number; errors: string[] }> {
+  console.log(`[Cron] 开始刷新订阅组 ID: ${groupId}`);
   const raw = await kv.get('subscriptions');
   const list: any[] = raw ? JSON.parse(raw) : [];
   const gIdx = list.findIndex((g: any) => g.id === groupId);
-  if (gIdx === -1) return { refreshed: 0, errors: ['订阅组不存在'] };
+  if (gIdx === -1) {
+    console.log(`[Cron] 订阅组不存在: ${groupId}`);
+    return { refreshed: 0, errors: ['订阅组不存在'] };
+  }
 
+  const groupName = list[gIdx].title || groupId;
   const entries = normalizeUrls(list[gIdx].urls ?? []);
   type FetchResult = { i: number; ok: boolean; url?: string; msg: string | null };
-  const jobs = entries.map((entry, i): Promise<FetchResult> =>
-    entry.refreshUrl
-      ? fetchAndExtractUrl(entry).then(r => ({ i, ...r, msg: r.msg }))
-      : Promise.resolve({ i, ok: false, url: undefined, msg: null })
-  );
+  const jobs = entries.map((entry, i): Promise<FetchResult> => {
+    if (entry.refreshUrl) {
+      console.log(`[Cron] 正在刷新 [${groupName}] 条目 ${i}: ${entry.refreshUrl}`);
+      return fetchAndExtractUrl(entry).then(r => ({ i, ...r, msg: r.msg }));
+    }
+    return Promise.resolve({ i, ok: false, url: undefined, msg: null });
+  });
   const results = await Promise.allSettled(jobs);
 
   let refreshed = 0;
@@ -315,25 +322,45 @@ async function refreshGroupUrls(groupId: string, kv: KVNamespace): Promise<{ ref
   for (const r of results) {
     if (r.status === 'fulfilled') {
       const { i, ok, url, msg } = r.value;
-      if (ok && url) { entries[i] = { ...entries[i], url, lastRefreshedAt: new Date().toISOString() }; refreshed++; }
-      else if (msg) errors.push(msg);
-    } else { errors.push(String(r.reason)); }
+      if (ok && url) {
+        console.log(`[Cron] 刷新成功 [${groupName}] 条目 ${i}: 获取到新 URL`);
+        entries[i] = { ...entries[i], url, lastRefreshedAt: new Date().toISOString() }; refreshed++;
+      }
+      else if (msg) {
+        console.error(`[Cron] 刷新失败 [${groupName}] 条目 ${i}: ${msg}`);
+        errors.push(msg);
+      }
+    } else {
+      console.error(`[Cron] 请求异常 [${groupName}]: ${String(r.reason)}`);
+      errors.push(String(r.reason));
+    }
   }
   list[gIdx] = { ...list[gIdx], urls: entries, updatedAt: new Date().toISOString() };
   await kv.put('subscriptions', JSON.stringify(list));
+  console.log(`[Cron] 完成刷新订阅组 [${groupName}], 成功: ${refreshed}, 失败: ${errors.length}`);
   return { refreshed, errors };
 }
 
 export default {
   // ---------- Cron 定时任务（每天 UTC 00:00）----------
-  async scheduled(_event: ScheduledEvent, env: Env, _ctx: ExecutionContext): Promise<void> {
+  async scheduled(event: ScheduledEvent, env: Env, _ctx: ExecutionContext): Promise<void> {
+    console.log(`[Cron] 定时任务触发: ${event.cron}`);
     const raw = await env.KV.get('subscriptions');
     const list: any[] = raw ? JSON.parse(raw) : [];
     // 筛选：组已启用且至少有一个 URL 条目配置了 refreshUrl
     const targets = list.filter((s: any) =>
       s.enabled && normalizeUrls(s.urls ?? []).some((e: UrlEntry) => e.refreshUrl)
     );
-    await Promise.allSettled(targets.map((g: any) => refreshGroupUrls(g.id, env.KV)));
+    console.log(`[Cron] 找到 ${targets.length} 个符合条件的订阅组准备刷新`);
+
+    const results = await Promise.allSettled(targets.map((g: any) => refreshGroupUrls(g.id, env.KV)));
+    let successCount = 0;
+    let failCount = 0;
+    for (const r of results) {
+      if (r.status === 'fulfilled') successCount++;
+      else failCount++;
+    }
+    console.log(`[Cron] 定时任务执行完毕: 成功组数 ${successCount}, 失败组数 ${failCount}`);
   },
 
   async fetch(request: Request, env: Env): Promise<Response> {
