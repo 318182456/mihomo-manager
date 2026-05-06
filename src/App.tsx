@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import type { FormEvent } from 'react';
 import CodeMirror from '@uiw/react-codemirror';
 import { yaml } from '@codemirror/lang-yaml';
+import { dracula } from '@uiw/codemirror-theme-dracula';
 import jsyaml from 'js-yaml';
 import {
   LayoutDashboard,
@@ -1074,7 +1075,7 @@ function TemplatesView() {
                   height="100%"
                   extensions={[yaml()]}
                   onChange={handleContentChange}
-                  theme="light"
+                  theme={dracula}
                   className="flex-1 overflow-auto text-sm"
                />
             </div>
