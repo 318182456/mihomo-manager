@@ -648,20 +648,18 @@ async function handleSubscriptionProxies(id: string, kv: KVNamespace): Promise<R
   for (let i = 0; i < results.length; i++) {
     const res = results[i];
     if (res.status === 'fulfilled' && res.value) {
+      let parsed: any[] = [];
       if (isNodeList(res.value)) {
-        const parsedNodes = parseNodeURIs(res.value);
-        for (const p of parsedNodes) {
-          if (p && p.name) proxies.add(p.name);
-        }
-      } else {
+        parsed = parseNodeURIs(res.value);
+      }
+      if (parsed.length === 0) {
         try {
-          const parsed = jsyaml.load(res.value) as any;
-          if (parsed && Array.isArray(parsed.proxies)) {
-            for (const p of parsed.proxies) {
-              if (p && p.name) proxies.add(p.name);
-            }
-          }
+          const yml = jsyaml.load(res.value) as any;
+          if (yml && Array.isArray(yml.proxies)) parsed = yml.proxies;
         } catch (e) { /* 忽略解析错误 */ }
+      }
+      for (const p of parsed) {
+        if (p && p.name) proxies.add(p.name);
       }
     }
   }
@@ -936,6 +934,15 @@ function parseNodeURIs(text: string): any[] {
   return proxies;
 }
 
+function safeBtoa(str: string): string {
+  try {
+    const bytes = new TextEncoder().encode(str);
+    let binary = '';
+    for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
+    return btoa(binary);
+  } catch { return ''; }
+}
+
 /** 判定是否为节点列表格式 */
 function isNodeList(text: string): boolean {
   const content = text.trim();
@@ -951,7 +958,7 @@ function isNodeList(text: string): boolean {
 function proxyToURI(p: any): string {
   const name = encodeURIComponent(p.name || '');
   if (p.type === 'ss') {
-    const auth = btoa(`${p.cipher}:${p.password}`).replace(/=/g, '');
+    const auth = safeBtoa(`${p.cipher}:${p.password}`).replace(/=/g, '');
     return `ss://${auth}@${p.server}:${p.port}#${name}`;
   }
   if (p.type === 'vmess') {
@@ -964,7 +971,7 @@ function proxyToURI(p: any): string {
       config.net = 'ws'; config.path = p['ws-opts'].path;
       config.host = p['ws-opts'].headers?.Host || '';
     }
-    return `vmess://${btoa(JSON.stringify(config))}`;
+    return `vmess://${safeBtoa(JSON.stringify(config))}`;
   }
   if (p.type === 'vless' || p.type === 'trojan') {
     let uri = `${p.type}://${p.type === 'vless' ? p.uuid : p.password}@${p.server}:${p.port}?type=${p.network || 'tcp'}`;
@@ -1009,24 +1016,24 @@ async function fetchProxiesFromGroup(
     if (res.status !== 'fulfilled' || !res.value) continue;
     rawYamls.push(res.value);
 
+    let parsed = [];
     if (isNodeList(res.value)) {
-      const parsedNodes = parseNodeURIs(res.value);
-      for (const p of parsedNodes) {
-        if (!p || !p.name) continue;
-        if (filterRe && !filterRe.test(p.name)) continue;
-        proxies.push(p);
-      }
-    } else {
+      parsed = parseNodeURIs(res.value);
+    }
+    
+    if (parsed.length === 0) {
       try {
-        const parsed = jsyaml.load(res.value) as any;
-        if (parsed && Array.isArray(parsed.proxies)) {
-          for (const p of parsed.proxies) {
-            if (!p || !p.name) continue;
-            if (filterRe && !filterRe.test(p.name)) continue;
-            proxies.push(p);
-          }
+        const yml = jsyaml.load(res.value) as any;
+        if (yml && Array.isArray(yml.proxies)) {
+          parsed = yml.proxies;
         }
       } catch { /* 忽略解析错误 */ }
+    }
+
+    for (const p of parsed) {
+      if (!p || !p.name) continue;
+      if (filterRe && !filterRe.test(p.name)) continue;
+      proxies.push(p);
     }
   }
 
@@ -1066,7 +1073,7 @@ async function handleSubFetch(pathname: string, env: Env, request: Request): Pro
 
   if (wantNodes) {
     const nodeText = proxies.map(p => proxyToURI(p)).filter(Boolean).join('\n');
-    return subResponse(btoa(nodeText), link.name, userInfo, true);
+    return subResponse(safeBtoa(nodeText), link.name, userInfo, true);
   }
 
   if (!tpl) {
