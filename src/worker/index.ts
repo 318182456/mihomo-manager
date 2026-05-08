@@ -156,8 +156,6 @@ interface StoredPasskey {
 /** 单条订阅 URL 条目 */
 export interface UrlEntry {
   url: string;
-  /** 订阅类型: clash (YAML) 或 nodes (URI 列表) */
-  type?: 'clash' | 'nodes';
   /** provider 名称，用于模板 {{PROVIDERS}} 注入，默认 p1/p2/... */
   name?: string;
   /** 归属的 proxy-group 名，用于模板 {{URL_GROUPS}} 动态生成分组 */
@@ -649,9 +647,8 @@ async function handleSubscriptionProxies(id: string, kv: KVNamespace): Promise<R
   
   for (let i = 0; i < results.length; i++) {
     const res = results[i];
-    const entry = entries[i];
     if (res.status === 'fulfilled' && res.value) {
-      if (entry.type === 'nodes') {
+      if (isNodeList(res.value)) {
         const parsedNodes = parseNodeURIs(res.value);
         for (const p of parsedNodes) {
           if (p && p.name) proxies.add(p.name);
@@ -939,6 +936,55 @@ function parseNodeURIs(text: string): any[] {
   return proxies;
 }
 
+/** 判定是否为节点列表格式 */
+function isNodeList(text: string): boolean {
+  const content = text.trim();
+  if (content.includes('://')) return true;
+  if (content.length > 16) {
+    const decoded = decodeBase64(content);
+    return decoded.includes('://');
+  }
+  return false;
+}
+
+/** 将代理对象转换回 URI */
+function proxyToURI(p: any): string {
+  const name = encodeURIComponent(p.name || '');
+  if (p.type === 'ss') {
+    const auth = btoa(`${p.cipher}:${p.password}`).replace(/=/g, '');
+    return `ss://${auth}@${p.server}:${p.port}#${name}`;
+  }
+  if (p.type === 'vmess') {
+    const config: any = {
+      v: "2", ps: p.name, add: p.server, port: p.port, id: p.uuid, aid: p.alterId || 0,
+      scy: p.cipher || "auto", net: p.network || "tcp", type: "none", host: p.host || "",
+      path: p.path || "", tls: p.tls ? "tls" : ""
+    };
+    if (p['ws-opts']) {
+      config.net = 'ws'; config.path = p['ws-opts'].path;
+      config.host = p['ws-opts'].headers?.Host || '';
+    }
+    return `vmess://${btoa(JSON.stringify(config))}`;
+  }
+  if (p.type === 'vless' || p.type === 'trojan') {
+    let uri = `${p.type}://${p.type === 'vless' ? p.uuid : p.password}@${p.server}:${p.port}?type=${p.network || 'tcp'}`;
+    if (p.tls) uri += `&security=tls`;
+    if (p.sni) uri += `&sni=${p.sni}`;
+    if (p.reality_opts) {
+      uri += `&security=reality&pbk=${encodeURIComponent(p.reality_opts['public-key'] || '')}&sid=${p.reality_opts.short_id || ''}`;
+    }
+    if (p['ws-opts']) uri += `&path=${encodeURIComponent(p['ws-opts'].path)}&host=${p['ws-opts'].headers?.Host || ''}`;
+    return `${uri}#${name}`;
+  }
+  if (p.type === 'hysteria2') {
+    return `hysteria2://${p.password}@${p.server}:${p.port}?sni=${p.sni || ''}#${name}`;
+  }
+  if (p.type === 'tuic') {
+    return `tuic://${p.uuid}:${p.password}@${p.server}:${p.port}?alpn=${(p.alpn || []).join(',')}&congestion_control=${p['congestion-controller'] || ''}#${name}`;
+  }
+  return '';
+}
+
 /**
  * 拉取订阅 URL 并返回过滤后的 proxies 数组 + 原始内容列表
  * 若存在 filter 则按正则过滤代理名称
@@ -960,11 +1006,10 @@ async function fetchProxiesFromGroup(
 
   for (let i = 0; i < results.length; i++) {
     const res = results[i];
-    const entry = group.urls[i];
     if (res.status !== 'fulfilled' || !res.value) continue;
     rawYamls.push(res.value);
 
-    if (entry.type === 'nodes') {
+    if (isNodeList(res.value)) {
       const parsedNodes = parseNodeURIs(res.value);
       for (const p of parsedNodes) {
         if (!p || !p.name) continue;
@@ -1012,6 +1057,17 @@ async function handleSubFetch(pathname: string, env: Env, request: Request): Pro
 
   // 拉取并过滤代理节点
   const { proxies, rawYamls } = await fetchProxiesFromGroup(group);
+
+  const ua = request.headers.get('User-Agent')?.toLowerCase() || '';
+  const urlParams = new URL(request.url).searchParams;
+  const flag = urlParams.get('flag') || urlParams.get('client');
+  // 判定是否返回通用节点列表
+  const wantNodes = ua.includes('v2ray') || ua.includes('nekobox') || ua.includes('shadowrocket') || ua.includes('postman') || ua.includes('curl') || flag === 'nodes';
+
+  if (wantNodes) {
+    const nodeText = proxies.map(p => proxyToURI(p)).filter(Boolean).join('\n');
+    return subResponse(btoa(nodeText), link.name, userInfo, true);
+  }
 
   if (!tpl) {
     // 无模板时：若能解析到 proxies 则重新序列化过滤结果，否则直接拼接原始内容
@@ -1176,12 +1232,14 @@ async function renderTemplate(template: string, group: SubscriptionGroup, filter
   return output;
 }
 
-function subResponse(content: string, name: string, userInfo: string): Response {
+function subResponse(content: string, name: string, userInfo: string, isNodes = false): Response {
   const encodedName = encodeURIComponent(name);
+  const ext = isNodes ? 'txt' : 'yaml';
+  const contentType = isNodes ? 'text/plain' : 'text/yaml';
   return new Response(content, {
     headers: {
-      'Content-Type': 'text/plain; charset=utf-8',
-      'Content-Disposition': `attachment; filename="profile.yaml"; filename*=utf-8''${encodedName}.yaml`,
+      'Content-Type': `${contentType}; charset=utf-8`,
+      'Content-Disposition': `attachment; filename="${encodedName}.${ext}"; filename*=utf-8''${encodedName}.${ext}`,
       'Subscription-Userinfo': userInfo,
       ...CORS,
     },

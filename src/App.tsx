@@ -708,19 +708,6 @@ function SubscriptionsView() {
                       {entry.lastRefreshedAt && (
                         <Clock size={11} className="text-zinc-600 shrink-0" title={`最近刷新: ${new Date(entry.lastRefreshedAt).toLocaleString('zh-CN')}`} />
                       )}
-                      {/* 订阅类型选择 */}
-                      <select
-                        value={entry.type ?? 'clash'}
-                        onChange={(e) => {
-                          setUrlField(group.id, i, 'type', e.target.value);
-                          saveUrls(group.id);
-                        }}
-                        title="订阅格式"
-                        className="w-16 bg-zinc-900 border border-technical-border/50 rounded-sm px-1 py-0.5 font-mono text-[10px] text-technical-muted focus:outline-none focus:border-technical-cyan/50 shrink-0"
-                      >
-                        <option value="clash">Clash</option>
-                        <option value="nodes">Nodes</option>
-                      </select>
                       {/* provider 名称 */}
                       <input type="text" value={entry.name ?? ''}
                         onChange={(e) => setUrlField(group.id, i, 'name', e.target.value)}
