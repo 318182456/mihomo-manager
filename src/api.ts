@@ -8,6 +8,8 @@ import {
 export interface UrlEntry {
   url: string;
   name?: string;
+  /** 订阅类型: clash (YAML) 或 nodes (URI 列表) */
+  type?: 'clash' | 'nodes';
   /** 归属的 proxy-group 名，用于模板 {{URL_GROUPS}} 动态生成分组 */
   proxyGroup?: string;
   /** 分组图标文件名（不含扩展名），如 Auto、Speedtest，前缀固定为 Qure/IconSet/Color/ */

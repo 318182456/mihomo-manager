@@ -156,6 +156,8 @@ interface StoredPasskey {
 /** 单条订阅 URL 条目 */
 export interface UrlEntry {
   url: string;
+  /** 订阅类型: clash (YAML) 或 nodes (URI 列表) */
+  type?: 'clash' | 'nodes';
   /** provider 名称，用于模板 {{PROVIDERS}} 注入，默认 p1/p2/... */
   name?: string;
   /** 归属的 proxy-group 名，用于模板 {{URL_GROUPS}} 动态生成分组 */
@@ -645,17 +647,24 @@ async function handleSubscriptionProxies(id: string, kv: KVNamespace): Promise<R
 
   const proxies: Set<string> = new Set();
   
-  for (const res of results) {
+  for (let i = 0; i < results.length; i++) {
+    const res = results[i];
+    const entry = entries[i];
     if (res.status === 'fulfilled' && res.value) {
-      try {
-        const parsed = jsyaml.load(res.value) as any;
-        if (parsed && Array.isArray(parsed.proxies)) {
-          for (const p of parsed.proxies) {
-            if (p && p.name) proxies.add(p.name);
-          }
+      if (entry.type === 'nodes') {
+        const parsedNodes = parseNodeURIs(res.value);
+        for (const p of parsedNodes) {
+          if (p && p.name) proxies.add(p.name);
         }
-      } catch (e) {
-        // 忽略解析错误
+      } else {
+        try {
+          const parsed = jsyaml.load(res.value) as any;
+          if (parsed && Array.isArray(parsed.proxies)) {
+            for (const p of parsed.proxies) {
+              if (p && p.name) proxies.add(p.name);
+            }
+          }
+        } catch (e) { /* 忽略解析错误 */ }
       }
     }
   }
@@ -841,8 +850,97 @@ function compileGroupExclude(filter: string): string {
   } catch { return ''; }
 }
 
+function decodeBase64(str: string): string {
+  try {
+    const padded = str.replace(/-/g, '+').replace(/_/g, '/').padEnd(str.length + (4 - str.length % 4) % 4, '=');
+    const binary = atob(padded);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return new TextDecoder().decode(bytes);
+  } catch { return ''; }
+}
+
+/** 解析通用的节点 URI 列表 (V2Ray, Nekobox 等) */
+function parseNodeURIs(text: string): any[] {
+  let content = text.trim();
+  // 检查全量 Base64
+  if (!content.includes('://') && content.length > 16) {
+    const decoded = decodeBase64(content);
+    if (decoded && decoded.includes('://')) content = decoded;
+  }
+
+  const lines = content.split(/[\n\r]+/).map(l => l.trim()).filter(l => l && l.includes('://'));
+  const proxies: any[] = [];
+
+  for (const line of lines) {
+    try {
+      const url = new URL(line);
+      const protocol = url.protocol.replace(':', '');
+      const remarks = decodeURIComponent(url.hash.replace(/^#/, '')) || 'Unnamed Node';
+      let proxy: any = { name: remarks, type: protocol, udp: true };
+
+      if (protocol === 'ss') {
+        const ssRegex = /^ss:\/\/([^@]+)@([^:]+):(\d+)/;
+        const match = line.match(ssRegex);
+        if (match) {
+          const [_, auth, host, port] = match;
+          const [method, password] = (auth.includes(':') ? auth : decodeBase64(auth)).split(':');
+          proxy.server = host; proxy.port = parseInt(port, 10);
+          proxy.cipher = method; proxy.password = password;
+        } else continue;
+      } else if (protocol === 'vmess') {
+        const config = JSON.parse(decodeBase64(url.host || url.pathname.replace(/^\/\//, '')));
+        proxy.name = config.ps || proxy.name;
+        proxy.server = config.add; proxy.port = parseInt(config.port, 10);
+        proxy.uuid = config.id; proxy.alterId = parseInt(config.aid || '0', 10);
+        proxy.cipher = config.scy || 'auto';
+        if (config.net === 'ws') {
+          proxy.network = 'ws';
+          proxy['ws-opts'] = { path: config.path || '/', headers: { Host: config.host || '' } };
+        }
+        if (config.tls === 'tls') proxy.tls = true;
+      } else if (protocol === 'vless' || protocol === 'trojan') {
+        proxy.server = url.hostname; proxy.port = parseInt(url.port, 10);
+        if (protocol === 'vless') proxy.uuid = url.username;
+        else proxy.password = url.username;
+        const params = url.searchParams;
+        if (params.get('security') === 'tls' || params.get('security') === 'reality') proxy.tls = true;
+        if (params.get('sni')) proxy.sni = params.get('sni');
+        if (params.get('flow')) proxy.flow = params.get('flow');
+        if (params.get('fp')) proxy.client_fingerprint = params.get('fp');
+        if (params.get('pbk')) proxy.reality_opts = { 'public-key': params.get('pbk') };
+        if (params.get('sid')) proxy.reality_opts = { ...proxy.reality_opts, short_id: params.get('sid') };
+        proxy.network = params.get('type') || 'tcp';
+        if (proxy.network === 'ws') {
+          proxy['ws-opts'] = { path: params.get('path') || '/', headers: { Host: params.get('host') || '' } };
+        } else if (proxy.network === 'grpc') {
+          proxy['grpc-opts'] = { 'grpc-service-name': params.get('serviceName') || '' };
+        }
+      } else if (protocol === 'hysteria2' || protocol === 'hy2') {
+        proxy.type = 'hysteria2';
+        proxy.server = url.hostname; proxy.port = parseInt(url.port, 10);
+        proxy.password = url.username;
+        const params = url.searchParams;
+        if (params.get('sni')) proxy.sni = params.get('sni');
+        if (params.get('obfs') === 'onion') {
+           proxy.obfs = 'onion'; proxy['obfs-password'] = params.get('obfs-password');
+        }
+      } else if (protocol === 'tuic') {
+        proxy.server = url.hostname; proxy.port = parseInt(url.port, 10);
+        proxy.uuid = url.username; proxy.password = url.password;
+        proxy.alpn = url.searchParams.get('alpn')?.split(',') || ['h3'];
+        proxy['congestion-controller'] = url.searchParams.get('congestion_control') || 'cubic';
+      } else {
+        continue;
+      }
+      if (proxy.server && proxy.port) proxies.push(proxy);
+    } catch (e) { console.error('Parse node failed:', e); }
+  }
+  return proxies;
+}
+
 /**
- * 拉取订阅 URL 并返回过滤后的 proxies 数组 + 原始 YAML 列表
+ * 拉取订阅 URL 并返回过滤后的 proxies 数组 + 原始内容列表
  * 若存在 filter 则按正则过滤代理名称
  */
 async function fetchProxiesFromGroup(
@@ -860,19 +958,31 @@ async function fetchProxiesFromGroup(
   const rawYamls: string[] = [];
   const proxies: any[] = [];
 
-  for (const res of results) {
+  for (let i = 0; i < results.length; i++) {
+    const res = results[i];
+    const entry = group.urls[i];
     if (res.status !== 'fulfilled' || !res.value) continue;
     rawYamls.push(res.value);
-    try {
-      const parsed = jsyaml.load(res.value) as any;
-      if (parsed && Array.isArray(parsed.proxies)) {
-        for (const p of parsed.proxies) {
-          if (!p || !p.name) continue;
-          if (filterRe && !filterRe.test(p.name)) continue;
-          proxies.push(p);
-        }
+
+    if (entry.type === 'nodes') {
+      const parsedNodes = parseNodeURIs(res.value);
+      for (const p of parsedNodes) {
+        if (!p || !p.name) continue;
+        if (filterRe && !filterRe.test(p.name)) continue;
+        proxies.push(p);
       }
-    } catch { /* 忽略解析错误，回退到原始拼接 */ }
+    } else {
+      try {
+        const parsed = jsyaml.load(res.value) as any;
+        if (parsed && Array.isArray(parsed.proxies)) {
+          for (const p of parsed.proxies) {
+            if (!p || !p.name) continue;
+            if (filterRe && !filterRe.test(p.name)) continue;
+            proxies.push(p);
+          }
+        }
+      } catch { /* 忽略解析错误 */ }
+    }
   }
 
   return { proxies, rawYamls };
