@@ -1232,7 +1232,7 @@ async function renderTemplate(template: string, group: SubscriptionGroup, filter
     const providers = group.urls
       .filter(e => e.name && (e.proxyGroup || 'other') === trimmedPgName)
       .map(e => e.name!);
-    return JSON.stringify(providers);
+    return providers.join(', ');
   });
 
   // {{URL_GROUP_NAMES}} → 所有 proxyGroup 名称（去重，保持顺序，包含 other）
