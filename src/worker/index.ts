@@ -1190,12 +1190,13 @@ async function renderTemplate(template: string, group: SubscriptionGroup, filter
       if (!info.icon && entry.icon) info.icon = entry.icon; // 取第一个有图标的
     }
     const groupBlocks = Array.from(groupMap.entries()).map(([groupName, info]) => {
-      const useList = info.providers.join(', ');
+      const useLines = info.providers.map(p => `      - ${p}`).join('\n');
       const iconLine = `\n    icon: ${ICON_BASE}${info.icon ?? 'Server'}.png`;
       return [
         `  - name: ${groupName}`,
         `    type: url-test`,
-        `    use: [${useList}]`,
+        `    use:`,
+        useLines,
         `    tolerance: 50`,
         `    url: https://www.gstatic.com/generate_204`,
         `    interval: 300`,
@@ -1207,6 +1208,32 @@ async function renderTemplate(template: string, group: SubscriptionGroup, filter
       .replace(/^\s*#\s*\{\{URL_GROUPS\}\}\s*$/m, replacement)
       .replace(/\{\{URL_GROUPS\}\}/g, replacement);
   }
+
+  // {{URL_GROUP_PROVIDERS:分组名}} → 某分组下的所有 provider 名称，以 YAML 列表形式输出
+  // 例如：
+  //     use:
+  //       {{URL_GROUP_PROVIDERS:AI}}
+  // 会被替换为：
+  //     use:
+  //       - XS
+  //       - 三毛
+  output = output.replace(/^(\s*)\{\{URL_GROUP_PROVIDERS:([^}]+)\}\}/gm, (match, indent, pgName) => {
+    const trimmedPgName = pgName.trim();
+    const providers = group.urls
+      .filter(e => e.name && (e.proxyGroup || 'other') === trimmedPgName)
+      .map(e => e.name!);
+    if (providers.length === 0) return `${indent}[]`;
+    return providers.map(p => `${indent}- ${p}`).join('\n');
+  });
+
+  // 兜底替换：行内 {{URL_GROUP_PROVIDERS:分组名}}
+  output = output.replace(/\{\{URL_GROUP_PROVIDERS:([^}]+)\}\}/g, (match, pgName) => {
+    const trimmedPgName = pgName.trim();
+    const providers = group.urls
+      .filter(e => e.name && (e.proxyGroup || 'other') === trimmedPgName)
+      .map(e => e.name!);
+    return JSON.stringify(providers);
+  });
 
   // {{URL_GROUP_NAMES}} → 所有 proxyGroup 名称（去重，保持顺序，包含 other）
   if (output.includes('{{URL_GROUP_NAMES}}')) {
