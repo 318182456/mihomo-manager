@@ -278,8 +278,15 @@ async function fetchAndExtractUrl(entry: UrlEntry): Promise<{ ok: boolean; url?:
         ...(entry.refreshHeaders ?? {})
       },
     });
-  } catch (e) { return { ok: false, msg: `请求失败: ${String(e)}` }; }
-  if (!resp.ok) return { ok: false, msg: `HTTP ${resp.status}` };
+  } catch (e) {
+    console.error(`[fetchAndExtractUrl] 请求失败:`, e);
+    return { ok: false, msg: `请求失败: ${String(e)}` };
+  }
+  if (!resp.ok) {
+    const errText = await resp.text().catch(() => '');
+    console.error(`[fetchAndExtractUrl] HTTP 错误 ${resp.status}, 响应内容:`, errText);
+    return { ok: false, msg: `HTTP ${resp.status}` };
+  }
   let json: any;
   try { json = await resp.json(); } catch { return { ok: false, msg: '响应非 JSON' }; }
 
