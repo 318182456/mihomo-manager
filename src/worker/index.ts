@@ -272,7 +272,11 @@ async function fetchAndExtractUrl(entry: UrlEntry): Promise<{ ok: boolean; url?:
   const urlToFetch = entry.refreshUrl.trim();
   try {
     resp = await fetch(urlToFetch, {
-      headers: { 'Accept': 'application/json', ...(entry.refreshHeaders ?? {}) },
+      headers: {
+        'Accept': 'application/json',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        ...(entry.refreshHeaders ?? {})
+      },
     });
   } catch (e) { return { ok: false, msg: `请求失败: ${String(e)}` }; }
   if (!resp.ok) return { ok: false, msg: `HTTP ${resp.status}` };
