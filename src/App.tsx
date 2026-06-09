@@ -868,8 +868,13 @@ function SubscriptionsView() {
                           <select
                             value={entry.refreshType ?? ''}
                             onChange={(e) => {
-                              setUrlField(group.id, i, 'refreshType', e.target.value || undefined);
-                              setTimeout(() => saveUrls(group.id), 0);
+                              const val = e.target.value || undefined;
+                              setUrlField(group.id, i, 'refreshType', val);
+                              const g = groups.find(x => x.id === group.id);
+                              if (g) {
+                                const newUrls = g.urls.map((u, j) => j === i ? { ...u, refreshType: val } : u);
+                                handleUpdateGroup(group.id, { urls: newUrls });
+                              }
                             }}
                             className="w-full bg-black/40 border border-technical-border rounded-sm px-2.5 py-1.5 font-mono text-xs text-gray-300 focus:outline-none focus:border-technical-cyan/50"
                           >
