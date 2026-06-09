@@ -268,8 +268,91 @@ function normalizeUrls(raw: any[]): UrlEntry[] {
 /** 从单个 UrlEntry 的 refreshUrl 接口拉取最新订阅链接 */
 async function fetchAndExtractUrl(entry: UrlEntry): Promise<{ ok: boolean; url?: string; msg: string }> {
   if (!entry.refreshUrl) return { ok: false, msg: '未配置 refreshUrl' };
-  let resp: Response;
   const urlToFetch = entry.refreshUrl.trim();
+
+  if (urlToFetch.includes('xsus2.com')) {
+    // 1. 获取动态跳转域名列表
+    let domains: any[] = [];
+    try {
+      const dataRes = await fetch('https://xsus2.com/data.json?t=' + Date.now(), {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+        }
+      });
+      domains = await dataRes.json() as any[];
+    } catch (e) {
+      console.error('[xsus] 获取动态域名列表失败, 使用默认 xsus3.com:', e);
+      domains = [{ jumpUrl: 'https://xsus3.com/' }];
+    }
+
+    const email = entry.refreshHeaders?.email || entry.refreshHeaders?.Email;
+    const password = entry.refreshHeaders?.password || entry.refreshHeaders?.Password;
+    if (!email || !password) {
+      return { ok: false, msg: '需要在 refreshHeaders 中配置 email 和 password' };
+    }
+
+    let lastError = '';
+    for (const d of domains) {
+      const host = d.jumpUrl;
+      if (!host) continue;
+      try {
+        // 2. 登录请求
+        const loginUrl = new URL('/data/passport/auth/login', host).toString();
+        const loginRes = await fetch(loginUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Client-Type': 'Hoshi',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+          },
+          body: JSON.stringify({ email, password })
+        });
+
+        if (!loginRes.ok) {
+          lastError = `Login HTTP ${loginRes.status}`;
+          continue;
+        }
+
+        const loginJson = await loginRes.json() as any;
+        if (!loginJson.success || !loginJson.data?.auth_data) {
+          lastError = `Login failed: ${loginJson.data || 'unknown error'}`;
+          continue;
+        }
+
+        const token = loginJson.data.auth_data;
+
+        // 3. 获取最新订阅 URL
+        const subUrl = new URL('/data/user/getSubscribe', host).toString();
+        const subRes = await fetch(subUrl, {
+          headers: {
+            'Authorization': token,
+            'X-Client-Type': 'Hoshi',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+          }
+        });
+
+        if (!subRes.ok) {
+          lastError = `GetSubscribe HTTP ${subRes.status}`;
+          continue;
+        }
+
+        const subJson = await subRes.json() as any;
+        if (!subJson.success || !subJson.data?.subscribe_url) {
+          lastError = `GetSubscribe response success is false`;
+          continue;
+        }
+
+        const subscribeUrl = subJson.data.subscribe_url;
+        return { ok: true, url: subscribeUrl, msg: '获取成功' };
+      } catch (err) {
+        lastError = String(err);
+        console.error(`[xsus] 尝试节点 ${host} 出错:`, err);
+      }
+    }
+    return { ok: false, msg: `xsus 刷新失败: ${lastError}` };
+  }
+
+  let resp: Response;
   try {
     resp = await fetch(urlToFetch, {
       headers: {
