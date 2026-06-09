@@ -864,6 +864,21 @@ function SubscriptionsView() {
                           />
                         </div>
                         <div>
+                          <label className="block text-[9px] font-display text-technical-muted uppercase tracking-widest mb-1">解析类型 (refreshType)</label>
+                          <select
+                            value={entry.refreshType ?? ''}
+                            onChange={(e) => {
+                              setUrlField(group.id, i, 'refreshType', e.target.value || undefined);
+                              setTimeout(() => saveUrls(group.id), 0);
+                            }}
+                            className="w-full bg-black/40 border border-technical-border rounded-sm px-2.5 py-1.5 font-mono text-xs text-gray-300 focus:outline-none focus:border-technical-cyan/50"
+                          >
+                            <option value="">默认 (直接提取订阅接口返回的 JSON)</option>
+                            <option value="hoshi_v2board">Hoshi 动态跳转 (如 Xsus，提供 Portal 地址及账号密码)</option>
+                            <option value="v2board">普通 V2Board (直接登录，提供 API 根地址及账号密码)</option>
+                          </select>
+                        </div>
+                        <div>
                           <label className="block text-[9px] font-display text-technical-muted uppercase tracking-widest mb-1">请求头 JSON (refreshHeaders - 选填)</label>
                           <textarea rows={2}
                             value={entry.refreshHeaders ? JSON.stringify(entry.refreshHeaders, null, 2) : ''}

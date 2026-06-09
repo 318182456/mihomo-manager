@@ -16,6 +16,7 @@ export interface UrlEntry {
   refreshHeaders?: Record<string, string>;
   refreshJsonPath?: string;
   lastRefreshedAt?: string;
+  refreshType?: string;
 }
 
 export interface SubscriptionGroup {

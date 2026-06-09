@@ -170,6 +170,8 @@ export interface UrlEntry {
   refreshJsonPath?: string;
   /** 最近一次自动刷新时间 */
   lastRefreshedAt?: string;
+  /** 解析类型，用于特殊登录流程 */
+  refreshType?: string;
 }
 
 export interface SubscriptionGroup {
@@ -270,19 +272,24 @@ async function fetchAndExtractUrl(entry: UrlEntry): Promise<{ ok: boolean; url?:
   if (!entry.refreshUrl) return { ok: false, msg: '未配置 refreshUrl' };
   const urlToFetch = entry.refreshUrl.trim();
 
-  if (urlToFetch.includes('xsus2.com')) {
-    // 1. 获取动态跳转域名列表
+  if (entry.refreshType === 'hoshi_v2board' || entry.refreshType === 'v2board') {
+    // 1. 获取域名列表
     let domains: any[] = [];
-    try {
-      const dataRes = await fetch('https://xsus2.com/data.json?t=' + Date.now(), {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
-        }
-      });
-      domains = await dataRes.json() as any[];
-    } catch (e) {
-      console.error('[xsus] 获取动态域名列表失败, 使用默认 xsus3.com:', e);
-      domains = [{ jumpUrl: 'https://xsus3.com/' }];
+    if (entry.refreshType === 'hoshi_v2board') {
+      try {
+        const dataUrl = new URL('/data.json', urlToFetch).toString();
+        const dataRes = await fetch(dataUrl, {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+          }
+        });
+        domains = await dataRes.json() as any[];
+      } catch (e) {
+        console.error('[v2board] 获取动态域名列表失败, 尝试使用初始 URL:', e);
+        domains = [{ jumpUrl: urlToFetch }];
+      }
+    } else {
+      domains = [{ jumpUrl: urlToFetch }];
     }
 
     const email = entry.refreshHeaders?.email || entry.refreshHeaders?.Email;
@@ -293,7 +300,7 @@ async function fetchAndExtractUrl(entry: UrlEntry): Promise<{ ok: boolean; url?:
 
     let lastError = '';
     for (const d of domains) {
-      const host = d.jumpUrl;
+      const host = d.jumpUrl || d.checkUrl || urlToFetch;
       if (!host) continue;
       try {
         // 2. 登录请求
@@ -346,10 +353,10 @@ async function fetchAndExtractUrl(entry: UrlEntry): Promise<{ ok: boolean; url?:
         return { ok: true, url: subscribeUrl, msg: '获取成功' };
       } catch (err) {
         lastError = String(err);
-        console.error(`[xsus] 尝试节点 ${host} 出错:`, err);
+        console.error(`[v2board] 尝试节点 ${host} 出错:`, err);
       }
     }
-    return { ok: false, msg: `xsus 刷新失败: ${lastError}` };
+    return { ok: false, msg: `v2board 刷新失败: ${lastError}` };
   }
 
   let resp: Response;
