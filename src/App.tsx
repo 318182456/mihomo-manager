@@ -425,6 +425,9 @@ function SubscriptionsView() {
   const [proxyCache, setProxyCache] = useState<Record<string, string[]>>({});
   const [loadingProxies, setLoadingProxies] = useState<Record<string, boolean>>({});
 
+  const [dragInfo, setDragInfo] = useState<{ groupId: string; index: number } | null>(null);
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
+
   const handleFetchProxies = async (groupId: string) => {
     setLoadingProxies(prev => ({ ...prev, [groupId]: true }));
     try {
@@ -693,11 +696,53 @@ function SubscriptionsView() {
               {group.urls.map((entry, i) => {
                 const key = urlKey(group.id, i);
                 const isExpanded = expandedKey === key;
+                const isDragging = dragInfo?.groupId === group.id && dragInfo?.index === i;
+                const isDragOver = dragInfo?.groupId === group.id && dragOverIndex === i;
                 return (
-                  <div key={i} className="border-b border-technical-border/30 last:border-0">
+                  <div
+                    key={i}
+                    draggable={isDragging}
+                    onDragStart={(e) => {
+                      e.dataTransfer.effectAllowed = 'move';
+                    }}
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      if (dragInfo && dragInfo.groupId === group.id && dragInfo.index !== i) {
+                        setDragOverIndex(i);
+                      }
+                    }}
+                    onDragEnd={() => {
+                      if (dragInfo && dragOverIndex !== null && dragInfo.index !== dragOverIndex) {
+                        const newUrls = [...group.urls];
+                        const [removed] = newUrls.splice(dragInfo.index, 1);
+                        newUrls.splice(dragOverIndex, 0, removed);
+                        
+                        setGroups(groups.map(g => g.id === group.id ? { ...g, urls: newUrls } : g));
+                        handleUpdateGroup(group.id, { urls: newUrls });
+                      }
+                      setDragInfo(null);
+                      setDragOverIndex(null);
+                    }}
+                    className={`border-b border-technical-border/30 last:border-0 transition-all ${
+                      isDragging ? 'opacity-40 bg-zinc-900/50' : ''
+                    } ${
+                      isDragOver ? 'border-t-2 border-t-technical-cyan bg-technical-cyan/5' : ''
+                    }`}
+                  >
                     {/* URL 主行 */}
                     <div className="group/row flex items-center gap-2 px-4 py-2.5 hover:bg-white/5 transition-colors">
-                      <GripVertical size={15} className="text-zinc-800 cursor-grab group-hover/row:text-zinc-600 shrink-0" />
+                      <GripVertical
+                        size={15}
+                        className="text-zinc-800 cursor-grab active:cursor-grabbing group-hover/row:text-zinc-600 shrink-0"
+                        onMouseDown={() => {
+                          setDragInfo({ groupId: group.id, index: i });
+                        }}
+                        onMouseUp={() => {
+                          if (dragInfo && dragOverIndex === null) {
+                            setDragInfo(null);
+                          }
+                        }}
+                      />
                       {/* URL 输入 */}
                       <input type="text" value={entry.url}
                         onChange={(e) => setUrlField(group.id, i, 'url', e.target.value)}
