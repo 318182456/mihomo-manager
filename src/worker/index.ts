@@ -1364,6 +1364,16 @@ async function renderTemplate(template: string, group: SubscriptionGroup, filter
     .replace(/\{\{GROUP_EXCLUDE\}\}/g, goExclude)
     .replace(/\{\{GENERATED_AT\}\}/g,  new Date().toISOString());
 
+  // 清理 flow sequence [...] 中的空项和多余逗号
+  output = output.replace(/\[([^\]]*)\]/g, (match, content) => {
+    const cleaned = content
+      .split(',')
+      .map((x: string) => x.trim())
+      .filter(Boolean)
+      .join(', ');
+    return `[${cleaned}]`;
+  });
+
   return output;
 }
 
