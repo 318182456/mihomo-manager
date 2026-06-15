@@ -948,6 +948,43 @@ function SubscriptionsView() {
                           />
                         </div>
 
+                        {/* Hysteria 2 微调参数 */}
+                        <div className="pt-2 border-t border-technical-border/20 space-y-2">
+                          <label className="block text-[10px] font-display font-bold text-amber-400 uppercase tracking-widest">Hysteria 2 客户端微调参数 (仅对该订阅中的 Hysteria 2 节点生效)</label>
+                          <div className="grid grid-cols-3 gap-3">
+                            <div>
+                              <label className="block text-[9px] font-display text-technical-muted uppercase tracking-widest mb-1">上传速度限制 (up)</label>
+                              <input type="text" value={entry.hysteria2Up ?? ''}
+                                onChange={(e) => setUrlField(group.id, i, 'hysteria2Up', e.target.value)}
+                                onBlur={() => saveUrls(group.id)}
+                                placeholder="如: 30 Mbps"
+                                className="w-full bg-black/40 border border-technical-border rounded-sm px-2.5 py-1.5 font-mono text-xs text-gray-300 focus:outline-none focus:border-technical-cyan/50"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[9px] font-display text-technical-muted uppercase tracking-widest mb-1">下载速度限制 (down)</label>
+                              <input type="text" value={entry.hysteria2Down ?? ''}
+                                onChange={(e) => setUrlField(group.id, i, 'hysteria2Down', e.target.value)}
+                                onBlur={() => saveUrls(group.id)}
+                                placeholder="如: 150 Mbps"
+                                className="w-full bg-black/40 border border-technical-border rounded-sm px-2.5 py-1.5 font-mono text-xs text-gray-300 focus:outline-none focus:border-technical-cyan/50"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[9px] font-display text-technical-muted uppercase tracking-widest mb-1">MTU 限制 (mtu)</label>
+                              <input type="number" value={entry.hysteria2Mtu ?? ''}
+                                onChange={(e) => {
+                                  const val = e.target.value ? parseInt(e.target.value, 10) : undefined;
+                                  setUrlField(group.id, i, 'hysteria2Mtu', val);
+                                }}
+                                onBlur={() => saveUrls(group.id)}
+                                placeholder="如: 1350"
+                                className="w-full bg-black/40 border border-technical-border rounded-sm px-2.5 py-1.5 font-mono text-xs text-gray-300 focus:outline-none focus:border-technical-cyan/50"
+                              />
+                            </div>
+                          </div>
+                        </div>
+
                         <div className="flex items-center gap-3 pt-0.5">
                           <button
                             onClick={() => handleUrlRefresh(group.id, i)}

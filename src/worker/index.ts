@@ -172,6 +172,9 @@ export interface UrlEntry {
   lastRefreshedAt?: string;
   /** 解析类型，用于特殊登录流程 */
   refreshType?: string;
+  hysteria2Up?: string;
+  hysteria2Down?: string;
+  hysteria2Mtu?: number;
 }
 
 export interface SubscriptionGroup {
@@ -1021,6 +1024,9 @@ function parseNodeURIs(text: string): any[] {
         if (params.get('obfs') === 'onion') {
            proxy.obfs = 'onion'; proxy['obfs-password'] = params.get('obfs-password');
         }
+        if (params.get('up')) proxy.up = params.get('up');
+        if (params.get('down')) proxy.down = params.get('down');
+        if (params.get('mtu')) proxy.mtu = parseInt(params.get('mtu')!, 10);
       } else if (protocol === 'tuic') {
         proxy.server = url.hostname; proxy.port = parseInt(url.port, 10);
         proxy.uuid = url.username; proxy.password = url.password;
@@ -1131,9 +1137,15 @@ async function fetchProxiesFromGroup(
       } catch { /* 忽略解析错误 */ }
     }
 
+    const entry = group.urls[i];
     for (const p of parsed) {
       if (!p || !p.name) continue;
       if (filterRe && !filterRe.test(p.name)) continue;
+      if (p.type === 'hysteria2') {
+        if (entry.hysteria2Up) p.up = entry.hysteria2Up;
+        if (entry.hysteria2Down) p.down = entry.hysteria2Down;
+        if (entry.hysteria2Mtu) p.mtu = entry.hysteria2Mtu;
+      }
       proxies.push(p);
     }
   }
