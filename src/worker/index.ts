@@ -1359,6 +1359,42 @@ async function handleSubFetch(pathname: string, env: Env, request: Request): Pro
   const globalUrls = await getGlobalUrlsAndMigrate(env.KV);
   const group: SubscriptionGroup = resolveSubscriptionGroup(rawGroup, globalUrls);
 
+  const ua = request.headers.get('User-Agent')?.toLowerCase() || '';
+  const urlParams = new URL(request.url).searchParams;
+  const flag = urlParams.get('flag') || urlParams.get('client');
+  const wantNodes = ua.includes('v2ray') || ua.includes('nekobox') || ua.includes('shadowrocket') || ua.includes('postman') || ua.includes('curl') || flag === 'nodes';
+
+  const providerParam = urlParams.get('provider');
+  const urlIdParam = urlParams.get('url_id');
+  const urlIndexParam = urlParams.get('url_index');
+
+  // 若请求指定了特定的上级订阅源，则作为 proxy-provider 接口直接返回节点列表
+  if (providerParam || urlIdParam || urlIndexParam !== null) {
+    let targetUrls = group.urls;
+    if (providerParam) {
+      targetUrls = group.urls.filter(u => u.name === providerParam);
+    } else if (urlIdParam) {
+      targetUrls = group.urls.filter(u => u.id === urlIdParam);
+    } else if (urlIndexParam !== null) {
+      const idx = parseInt(urlIndexParam, 10);
+      if (!isNaN(idx) && group.urls[idx]) {
+        targetUrls = [group.urls[idx]];
+      }
+    }
+
+    const resolvedGroup = { ...group, urls: targetUrls };
+    const { proxies } = await fetchProxiesFromGroup(resolvedGroup);
+    const userInfo = await fetchSubscriptionUserInfo(targetUrls);
+
+    if (wantNodes) {
+      const nodeText = proxies.map(p => proxyToURI(p)).filter(Boolean).join('\n');
+      return subResponse(safeBtoa(nodeText), providerParam || 'provider', userInfo, true);
+    }
+
+    const providerYaml = jsyaml.dump({ proxies }, { lineWidth: -1 });
+    return subResponse(providerYaml, providerParam || 'provider', userInfo);
+  }
+
   const tplObj = await env.ATTACHMENTS.get(link.templateId);
   const tpl: Template|null = tplObj ? JSON.parse(await tplObj.text()) : null;
 
@@ -1367,21 +1403,8 @@ async function handleSubFetch(pathname: string, env: Env, request: Request): Pro
   // 拉取并过滤代理节点
   const { proxies, rawYamls } = await fetchProxiesFromGroup(group);
 
-  const ua = request.headers.get('User-Agent')?.toLowerCase() || '';
-  const urlParams = new URL(request.url).searchParams;
-  const flag = urlParams.get('flag') || urlParams.get('client');
-  // 判定是否返回通用节点列表
-  const wantNodes = ua.includes('v2ray') || ua.includes('nekobox') || ua.includes('shadowrocket') || ua.includes('postman') || ua.includes('curl') || flag === 'nodes';
-
-  if (wantNodes) {
-    const nodeText = proxies.map(p => proxyToURI(p)).filter(Boolean).join('\n');
-    return subResponse(safeBtoa(nodeText), link.name, userInfo, true);
-  }
-
   if (!tpl) {
-    // 无模板时：若能解析到 proxies 则重新序列化过滤结果，否则直接拼接原始内容
     if (proxies.length > 0) {
-      // 取第一份 YAML 作为基础结构，替换其中的 proxies
       try {
         const base = jsyaml.load(rawYamls[0]) as any;
         if (base && Array.isArray(base.proxies)) {
@@ -1393,7 +1416,7 @@ async function handleSubFetch(pathname: string, env: Env, request: Request): Pro
     return subResponse(rawYamls.join('\n'), link.name, userInfo);
   }
 
-  const output = await renderTemplate(tpl.content, group, proxies, env);
+  const output = await renderTemplate(tpl.content, group, proxies, env, request.url);
   return subResponse(output, link.name, userInfo);
 }
 
@@ -1421,8 +1444,9 @@ async function handleSubFetch(pathname: string, env: Env, request: Request): Pro
  * 4. 包含其他模板：
  *    {{INCLUDE: 模板名称}} → 会被替换为对应的子模板内容
  */
-async function renderTemplate(template: string, group: SubscriptionGroup, filteredProxies: any[], env: Env): Promise<string> {
+async function renderTemplate(template: string, group: SubscriptionGroup, filteredProxies: any[], env: Env, requestUrl?: string): Promise<string> {
   let output = template;
+  const subUrlBase = requestUrl ? requestUrl.split('?')[0] : '';
 
   // 1. 获取所有模板用于 INCLUDE 替换 (利用自动 seed 获取完整列表)
   const allTpls = await getOrSeedTemplates(env.ATTACHMENTS);
@@ -1443,13 +1467,14 @@ async function renderTemplate(template: string, group: SubscriptionGroup, filter
     maxDepth--;
   } while (output !== prevOutput && maxDepth > 0);
 
-  // 3. {{PROVIDERS}} → 完整 proxy-providers YAML 块
+  // 3. {{PROVIDERS}} → 完整 proxy-providers YAML 块 (代理 URL 以应用 Hysteria 2 参数和过滤规则)
   if (output.includes('# {{PROVIDERS}}') || output.includes('{{PROVIDERS}}')) {
     const providerLines = group.urls.map((entry, i) => {
       const name = entry.name ?? `p${i + 1}`;
+      const providerUrl = subUrlBase ? `${subUrlBase}?provider=${encodeURIComponent(name)}` : entry.url;
       return [
         `  ${name}:`,
-        `    url: "${entry.url}"`,
+        `    url: "${providerUrl}"`,
         `    path: "./providers/${name}.yaml"`,
         `    <<: *p`,
       ].join('\n');
@@ -1546,13 +1571,15 @@ async function renderTemplate(template: string, group: SubscriptionGroup, filter
     output = output.replace(/\{\{URL_GROUP_NAMES\}\}/g, names.join(','));
   }
 
-  // {{URL_0}}, {{URL_1}}, ... → 对应下标 URL
+  // {{URL_0}}, {{URL_1}}, ... → 对应下标 URL (使用代理 URL 以应用 Hysteria 2 参数和过滤规则)
   group.urls.forEach((entry, i) => {
-    output = output.replace(new RegExp(`\\{\\{URL_${i}\\}\\}`, 'g'), entry.url);
+    const proxiedUrl = subUrlBase ? `${subUrlBase}?url_index=${i}` : entry.url;
+    output = output.replace(new RegExp(`\\{\\{URL_${i}\\}\\}`, 'g'), proxiedUrl);
   });
 
-  // {{URL_ALL}} → 所有 URL 以换行分隔
-  output = output.replace(/\{\{URL_ALL\}\}/g, group.urls.map(e => e.url).join('\n'));
+  // {{URL_ALL}} → 所有 URL 以换行分隔 (使用代理 URL)
+  const allProxiedUrls = group.urls.map((entry, i) => subUrlBase ? `${subUrlBase}?url_index=${i}` : entry.url).join('\n');
+  output = output.replace(/\{\{URL_ALL\}\}/g, allProxiedUrls);
 
   // 通用变量
   // {{GROUP_FILTER}}  → Go RE2 兼容的正向匹配正则（用于 filter-regex 字段）
