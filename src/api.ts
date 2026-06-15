@@ -6,6 +6,7 @@ import {
 // ---------- 类型 ----------
 
 export interface UrlEntry {
+  id: string;
   url: string;
   name?: string;
   /** 归属 of proxy-group 名，用于模板 {{URL_GROUPS}} 动态生成分组 */
@@ -24,6 +25,7 @@ export interface UrlEntry {
 
 export interface SubscriptionGroup {
   id: string; title: string; enabled: boolean; filter: string;
+  urlIds: string[];
   urls: UrlEntry[];
   updatedAt: string;
 }
@@ -148,6 +150,18 @@ export const refreshUrlEntry = (groupId: string, urlIndex: number) =>
   apiFetch<{ ok: boolean; url: string }>(`/api/subscriptions/${groupId}/urls/${urlIndex}/refresh`, { method:'POST' });
 export const getSubscriptionProxies = (id: string) =>
   apiFetch<string[]>(`/api/subscriptions/${id}/proxies`);
+
+// ---------- Global URLs ----------
+
+export const getUrls = () => apiFetch<UrlEntry[]>('/api/urls');
+export const createUrl = (d: Omit<UrlEntry,'id'|'lastRefreshedAt'>) =>
+  apiFetch<UrlEntry>('/api/urls', { method:'POST', body: JSON.stringify(d) });
+export const updateUrl = (id: string, d: Partial<UrlEntry>) =>
+  apiFetch<UrlEntry>(`/api/urls/${id}`, { method:'PUT', body: JSON.stringify(d) });
+export const deleteUrl = (id: string) =>
+  apiFetch(`/api/urls/${id}`, { method:'DELETE' });
+export const refreshUrl = (id: string) =>
+  apiFetch<{ ok: boolean; url: string }>(`/api/urls/${id}/refresh`, { method:'POST' });
 
 // ---------- Templates ----------
 

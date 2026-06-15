@@ -415,10 +415,13 @@ function DashboardView() {
 
 function SubscriptionsView() {
   const [groups, setGroups] = useState<api.SubscriptionGroup[]>([]);
+  const [globalUrls, setGlobalUrls] = useState<api.UrlEntry[]>([]);
+  const [activeTab, setActiveTab] = useState<'groups' | 'sources'>('groups');
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState<string | null>(null);
-  // 展开的 URL 行：key = `${groupId}-${index}`
-  const [expandedKey, setExpandedKey] = useState<string | null>(null);
+
+  // Expanded configurations
+  const [expandedKey, setExpandedKey] = useState<string | null>(null); // 'source-{id}' or 'group-{id}'
   const [refreshingKey, setRefreshingKey] = useState<string | null>(null);
   const [urlMsg, setUrlMsg] = useState<{ key: string; ok: boolean; text: string } | null>(null);
 
@@ -439,8 +442,6 @@ function SubscriptionsView() {
       setLoadingProxies(prev => ({ ...prev, [groupId]: false }));
     }
   };
-
-  const urlKey = (gid: string, i: number) => `${gid}-${i}`;
 
   const compileFilter = (filterStr: string): string => {
     let compiledFilter = filterStr || '';
@@ -467,59 +468,101 @@ function SubscriptionsView() {
   };
 
   const loadData = async () => {
-    try { setGroups(await api.getSubscriptions()); }
+    try {
+      const [subs, urls] = await Promise.all([
+        api.getSubscriptions(),
+        api.getUrls()
+      ]);
+      setGroups(subs);
+      setGlobalUrls(urls);
+    }
     catch (e) { console.error(e); }
     finally { setLoading(false); }
   };
   useEffect(() => { loadData(); }, []);
 
   const handleAddGroup = async () => {
-    try { await api.createSubscription({ title: '新建订阅组', enabled: true, filter: '', urls: [] }); loadData(); }
-    catch { alert('添加失败'); }
-  };
-  const handleDeleteGroup = async (id: string) => {
-    if (!confirm('确定删除此订阅组吗？')) return;
-    try { await api.deleteSubscription(id); loadData(); }
-    catch { alert('删除失败'); }
-  };
-  const handleUpdateGroup = async (id: string, updates: Partial<api.SubscriptionGroup>) => {
-    setSavingId(id);
-    try { await api.updateSubscription(id, updates); setGroups(groups.map(g => g.id === id ? { ...g, ...updates } : g)); }
-    catch { alert('保存失败'); }
-    finally { setSavingId(null); }
-  };
-
-  // 修改单个 URL 条目的某个字段（本地 state）
-  const setUrlField = (gid: string, i: number, field: keyof api.UrlEntry, value: any) =>
-    setGroups(groups.map(g => g.id !== gid ? g : {
-      ...g, urls: g.urls.map((u, j) => j === i ? { ...u, [field]: value || undefined } : u)
-    }));
-
-  // 保存整组 urls（onBlur 时调用）
-  const saveUrls = (gid: string) => {
-    const g = groups.find(x => x.id === gid);
-    if (g) {
-      const trimmedUrls = g.urls.map(u => ({
-        ...u,
-        url: u.url.trim(),
-        refreshUrl: u.refreshUrl?.trim() || undefined
-      }));
-      handleUpdateGroup(gid, { urls: trimmedUrls });
-      setGroups(groups.map(gr => gr.id === gid ? { ...gr, urls: trimmedUrls } : gr));
+    try {
+      await api.createSubscription({ title: '新建订阅组', enabled: true, filter: '', urlIds: [], urls: [] });
+      loadData();
+    } catch {
+      alert('添加失败');
     }
   };
 
-  // 刷新单个 URL 条目
-  const handleUrlRefresh = async (gid: string, i: number) => {
-    const key = urlKey(gid, i);
-    setRefreshingKey(key); setUrlMsg(null);
+  const handleDeleteGroup = async (id: string) => {
+    if (!confirm('确定删除此订阅组吗？')) return;
     try {
-      const r = await api.refreshUrlEntry(gid, i);
-      setUrlMsg({ key, ok: true, text: r.url });
+      await api.deleteSubscription(id);
+      loadData();
+    } catch {
+      alert('删除失败');
+    }
+  };
+
+  const handleUpdateGroup = async (id: string, updates: Partial<api.SubscriptionGroup>) => {
+    setSavingId(id);
+    try {
+      await api.updateSubscription(id, updates);
+      setGroups(groups.map(g => g.id === id ? { ...g, ...updates } : g));
+    } catch {
+      alert('保存失败');
+    } finally {
+      setSavingId(null);
+    }
+  };
+
+  // Global URL source CRUD
+  const handleAddSource = async () => {
+    try {
+      await api.createUrl({ url: 'https://', name: '新订阅源' });
+      loadData();
+    } catch {
+      alert('添加失败');
+    }
+  };
+
+  const handleDeleteSource = async (id: string) => {
+    if (!confirm('确定删除此订阅源吗？(删除后，所有包含此源的订阅组将自动移除此引用)')) return;
+    try {
+      await api.deleteUrl(id);
+      loadData();
+    } catch {
+      alert('删除失败');
+    }
+  };
+
+  const handleUpdateSource = async (id: string, updates: Partial<api.UrlEntry>) => {
+    try {
+      await api.updateUrl(id, updates);
+      setGlobalUrls(globalUrls.map(u => u.id === id ? { ...u, ...updates } : u));
+      // 同步更新本地 groups 中的 resolved urls
+      setGroups(groups.map(g => {
+        if (g.urlIds.includes(id)) {
+          return {
+            ...g,
+            urls: g.urls.map(u => u.id === id ? { ...u, ...updates } : u)
+          };
+        }
+        return g;
+      }));
+    } catch {
+      alert('保存源失败');
+    }
+  };
+
+  const handleSourceRefresh = async (id: string) => {
+    setRefreshingKey(id);
+    setUrlMsg(null);
+    try {
+      const r = await api.refreshUrl(id);
+      setUrlMsg({ key: id, ok: true, text: r.url });
       loadData();
     } catch (e: any) {
-      setUrlMsg({ key, ok: false, text: e.message || '刷新失败' });
-    } finally { setRefreshingKey(null); }
+      setUrlMsg({ key: id, ok: false, text: e.message || '刷新失败' });
+    } finally {
+      setRefreshingKey(null);
+    }
   };
 
   if (loading) return <div className="p-10 text-technical-muted font-mono">Loading...</div>;
@@ -528,250 +571,249 @@ function SubscriptionsView() {
     <div className="p-6 md:p-10 space-y-8 w-full max-w-[1600px] mx-auto">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-end border-b border-technical-border pb-6 gap-6">
         <div>
-          <h2 className="text-2xl font-display font-bold text-white">订阅源</h2>
-          <p className="text-sm text-technical-muted mt-1">管理外部代理列表和配置上游 URL。</p>
+          <h2 className="text-2xl font-display font-bold text-white">订阅源与订阅组</h2>
+          <p className="text-sm text-technical-muted mt-1">统一管理订阅源 URL，并按需勾选/排序组成不同的订阅组。</p>
         </div>
-        <button className="technical-button-primary" onClick={handleAddGroup}>
-          <Plus size={14} /><span>添加组</span>
+        {activeTab === 'groups' ? (
+          <button className="technical-button-primary" onClick={handleAddGroup}>
+            <Plus size={14} /><span>添加组</span>
+          </button>
+        ) : (
+          <button className="technical-button-primary" onClick={handleAddSource}>
+            <Plus size={14} /><span>添加订阅源</span>
+          </button>
+        )}
+      </div>
+
+      {/* 选项卡 */}
+      <div className="flex border-b border-technical-border gap-6">
+        <button
+          onClick={() => setActiveTab('groups')}
+          className={`pb-3 text-xs uppercase tracking-widest font-display font-bold border-b-2 transition-all ${
+            activeTab === 'groups' ? 'border-technical-cyan text-technical-cyan' : 'border-transparent text-technical-muted hover:text-gray-200'
+          }`}
+        >
+          订阅组 ({groups.length})
+        </button>
+        <button
+          onClick={() => setActiveTab('sources')}
+          className={`pb-3 text-xs uppercase tracking-widest font-display font-bold border-b-2 transition-all ${
+            activeTab === 'sources' ? 'border-technical-cyan text-technical-cyan' : 'border-transparent text-technical-muted hover:text-gray-200'
+          }`}
+        >
+          订阅源管理 ({globalUrls.length})
         </button>
       </div>
 
-      <div className="space-y-8">
-        {groups.map((group) => (
-          <section key={group.id} className={`technical-card flex flex-col ${!group.enabled ? 'opacity-60 grayscale' : ''}`}>
-            {/* 组头 */}
-            <div className="bg-zinc-900 px-4 py-3 flex justify-between items-center border-b border-technical-border">
-              <div className="flex items-center gap-3 flex-1 min-w-0">
-                <Folder size={18} className="text-technical-muted shrink-0" />
-                <input
-                  className="bg-transparent border-none text-gray-200 font-display font-bold p-0 focus:ring-0 outline-none w-full max-w-xs"
-                  type="text" value={group.title}
-                  onChange={(e) => setGroups(groups.map(g => g.id === group.id ? { ...g, title: e.target.value } : g))}
-                  onBlur={(e) => handleUpdateGroup(group.id, { title: e.target.value })}
-                />
-                {savingId === group.id && <Activity size={14} className="text-technical-cyan animate-spin" />}
+      {activeTab === 'groups' ? (
+        <div className="space-y-8 animate-fadeIn">
+          {groups.map((group) => (
+            <section key={group.id} className={`technical-card flex flex-col ${!group.enabled ? 'opacity-60 grayscale' : ''}`}>
+              {/* 组头 */}
+              <div className="bg-zinc-900 px-4 py-3 flex justify-between items-center border-b border-technical-border">
+                <div className="flex items-center gap-3 flex-1 min-w-0">
+                  <Folder size={18} className="text-technical-muted shrink-0" />
+                  <input
+                    className="bg-transparent border-none text-gray-200 font-display font-bold p-0 focus:ring-0 outline-none w-full max-w-xs"
+                    type="text" value={group.title}
+                    onChange={(e) => setGroups(groups.map(g => g.id === group.id ? { ...g, title: e.target.value } : g))}
+                    onBlur={(e) => handleUpdateGroup(group.id, { title: e.target.value })}
+                  />
+                  {savingId === group.id && <Activity size={14} className="text-technical-cyan animate-spin" />}
+                </div>
+                <div className="flex items-center gap-4 shrink-0 ml-4">
+                  <button className="text-red-500/50 hover:text-red-500" onClick={() => handleDeleteGroup(group.id)}><Trash2 size={16} /></button>
+                  <div className="font-mono text-[10px] text-technical-muted bg-black border border-technical-border px-2 py-1 rounded">已选 {group.urlIds.length} 个源</div>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input type="checkbox" checked={group.enabled} onChange={(e) => handleUpdateGroup(group.id, { enabled: e.target.checked })} className="sr-only peer" />
+                    <div className="w-8 h-4.5 bg-zinc-800 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[3px] after:left-[3px] after:bg-gray-400 after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-technical-cyan/40 peer-checked:after:bg-technical-cyan" />
+                  </label>
+                </div>
               </div>
-              <div className="flex items-center gap-4 shrink-0 ml-4">
-                <button className="text-red-500/50 hover:text-red-500" onClick={() => handleDeleteGroup(group.id)}><Trash2 size={16} /></button>
-                <div className="font-mono text-[10px] text-technical-muted bg-black border border-technical-border px-2 py-1 rounded">{group.urls.length} 个 URL</div>
-                <label className="relative inline-flex items-center cursor-pointer">
-                  <input type="checkbox" checked={group.enabled} onChange={(e) => handleUpdateGroup(group.id, { enabled: e.target.checked })} className="sr-only peer" />
-                  <div className="w-8 h-4.5 bg-zinc-800 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[3px] after:left-[3px] after:bg-gray-400 after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-technical-cyan/40 peer-checked:after:bg-technical-cyan" />
-                </label>
-              </div>
-            </div>
 
-            {/* 筛选正则 */}
-            <div className="px-4 py-3 border-b border-technical-border/50 flex flex-col gap-3">
-              <div className="flex items-start sm:items-center gap-3">
-                <div className="flex items-center gap-2 text-technical-muted font-display text-[10px] uppercase tracking-widest whitespace-nowrap shrink-0 mt-2 sm:mt-0">
-                  <Filter size={13} /><span>筛选:</span>
-                  <button 
-                    onClick={() => {
-                      const isAdv = group.filter?.startsWith('{"advanced":true');
-                      if (isAdv) {
-                        handleUpdateGroup(group.id, { filter: '' });
-                      } else {
-                        handleUpdateGroup(group.id, { filter: JSON.stringify({ advanced: true, rules: [] }) });
-                      }
-                    }}
-                    className={`ml-1 hover:text-technical-cyan transition-colors ${group.filter?.startsWith('{"advanced":true') ? 'text-technical-cyan' : ''}`}
-                    title="切换高级模式 (AND/OR/NOT)"
+              {/* 筛选正则 */}
+              <div className="px-4 py-3 border-b border-technical-border/50 flex flex-col gap-3">
+                <div className="flex items-start sm:items-center gap-3">
+                  <div className="flex items-center gap-2 text-technical-muted font-display text-[10px] uppercase tracking-widest whitespace-nowrap shrink-0 mt-2 sm:mt-0">
+                    <Filter size={13} /><span>筛选:</span>
+                    <button 
+                      onClick={() => {
+                        const isAdv = group.filter?.startsWith('{"advanced":true');
+                        if (isAdv) {
+                          handleUpdateGroup(group.id, { filter: '' });
+                        } else {
+                          handleUpdateGroup(group.id, { filter: JSON.stringify({ advanced: true, rules: [] }) });
+                        }
+                      }}
+                      className={`ml-1 hover:text-technical-cyan transition-colors ${group.filter?.startsWith('{"advanced":true') ? 'text-technical-cyan' : ''}`}
+                      title="切换高级模式 (AND/OR/NOT)"
+                    >
+                      <Settings2 size={13} />
+                    </button>
+                  </div>
+                  {group.filter?.startsWith('{"advanced":true') ? (
+                    <div className="flex-1 min-w-0">
+                      {(() => {
+                        let rules: any[] = [];
+                        try { rules = JSON.parse(group.filter).rules || []; } catch {}
+                        
+                        const updateRules = (newRules: any[]) => {
+                          const newFilter = JSON.stringify({ advanced: true, rules: newRules });
+                          setGroups(groups.map(g => g.id === group.id ? { ...g, filter: newFilter } : g));
+                          handleUpdateGroup(group.id, { filter: newFilter });
+                        };
+
+                        return (
+                          <div className="flex flex-col gap-2 bg-black/40 border border-technical-border rounded-sm p-2 w-full overflow-hidden">
+                            {rules.map((rule, rIdx) => (
+                              <div key={rIdx} className="flex flex-col sm:flex-row sm:items-center gap-2 group/rule">
+                                <select 
+                                  value={rule.logic}
+                                  onChange={(e) => {
+                                    const n = [...rules];
+                                    n[rIdx].logic = e.target.value;
+                                    updateRules(n);
+                                  }}
+                                  className="bg-zinc-900 border border-technical-border text-[11px] text-technical-muted px-1.5 py-1 outline-none rounded-sm shrink-0"
+                                >
+                                  <option value="or">包含 (OR)</option>
+                                  <option value="and">必含 (AND)</option>
+                                  <option value="not">排除 (NOT)</option>
+                                </select>
+                                <input 
+                                  type="text"
+                                  value={rule.value}
+                                  onChange={(e) => {
+                                    const n = [...rules];
+                                    n[rIdx].value = e.target.value;
+                                    setGroups(groups.map(g => g.id === group.id ? { ...g, filter: JSON.stringify({ advanced: true, rules: n }) } : g));
+                                  }}
+                                  onBlur={() => {
+                                    const n = [...rules];
+                                    updateRules(n);
+                                  }}
+                                  placeholder="正则关键词..."
+                                  className="flex-1 min-w-0 bg-zinc-900 border border-technical-border/50 text-xs font-mono text-technical-cyan px-2 py-1 outline-none focus:border-technical-cyan/50 rounded-sm"
+                                />
+                                <button onClick={() => updateRules(rules.filter((_, i) => i !== rIdx))} className="text-red-500/50 hover:text-red-500 shrink-0 sm:opacity-0 group-hover/rule:opacity-100 transition-opacity">
+                                  <Trash2 size={13} />
+                                </button>
+                              </div>
+                            ))}
+                            <button 
+                              onClick={() => updateRules([...rules, { logic: 'or', value: '' }])}
+                              className="text-[10px] text-technical-cyan/70 hover:text-technical-cyan hover:bg-technical-cyan/10 self-start px-2 py-1 rounded transition-colors flex items-center gap-1"
+                            >
+                              <Plus size={12} /> 添加规则
+                            </button>
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  ) : (
+                    <input type="text" value={group.filter}
+                      onChange={(e) => setGroups(groups.map(g => g.id === group.id ? { ...g, filter: e.target.value } : g))}
+                      onBlur={(e) => handleUpdateGroup(group.id, { filter: e.target.value })}
+                      placeholder="留空则不筛选"
+                      className="flex-1 bg-black/40 border border-technical-border rounded-sm px-3 py-1 font-mono text-xs text-technical-cyan focus:outline-none focus:border-technical-cyan/30 transition-all"
+                    />
+                  )}
+                  <button
+                    onClick={() => handleFetchProxies(group.id)}
+                    disabled={loadingProxies[group.id]}
+                    className="technical-button-outline py-1 px-3 text-[10px] shrink-0 disabled:opacity-50"
                   >
-                    <Settings2 size={13} />
+                    {loadingProxies[group.id] ? <Activity size={12} className="animate-spin" /> : <RefreshCw size={12} />}
+                    <span className="ml-1">{loadingProxies[group.id] ? '获取中...' : '测试过滤'}</span>
                   </button>
                 </div>
-                {group.filter?.startsWith('{"advanced":true') ? (
-                  <div className="flex-1 min-w-0">
-                    {(() => {
-                      let rules: any[] = [];
-                      try { rules = JSON.parse(group.filter).rules || []; } catch {}
-                      
-                      const updateRules = (newRules: any[]) => {
-                        const newFilter = JSON.stringify({ advanced: true, rules: newRules });
-                        setGroups(groups.map(g => g.id === group.id ? { ...g, filter: newFilter } : g));
-                        handleUpdateGroup(group.id, { filter: newFilter });
-                      };
-
-                      return (
-                        <div className="flex flex-col gap-2 bg-black/40 border border-technical-border rounded-sm p-2 w-full overflow-hidden">
-                          {rules.map((rule, rIdx) => (
-                            <div key={rIdx} className="flex flex-col sm:flex-row sm:items-center gap-2 group/rule">
-                              <select 
-                                value={rule.logic}
-                                onChange={(e) => {
-                                  const n = [...rules];
-                                  n[rIdx].logic = e.target.value;
-                                  updateRules(n);
-                                }}
-                                className="bg-zinc-900 border border-technical-border text-[11px] text-technical-muted px-1.5 py-1 outline-none rounded-sm shrink-0"
-                              >
-                                <option value="or">包含 (OR)</option>
-                                <option value="and">必含 (AND)</option>
-                                <option value="not">排除 (NOT)</option>
-                              </select>
-                              <input 
-                                type="text"
-                                value={rule.value}
-                                onChange={(e) => {
-                                  const n = [...rules];
-                                  n[rIdx].value = e.target.value;
-                                  setGroups(groups.map(g => g.id === group.id ? { ...g, filter: JSON.stringify({ advanced: true, rules: n }) } : g));
-                                }}
-                                onBlur={() => {
-                                  const n = [...rules];
-                                  updateRules(n);
-                                }}
-                                placeholder="正则关键词..."
-                                className="flex-1 min-w-0 bg-zinc-900 border border-technical-border/50 text-xs font-mono text-technical-cyan px-2 py-1 outline-none focus:border-technical-cyan/50 rounded-sm"
-                              />
-                              <button onClick={() => updateRules(rules.filter((_, i) => i !== rIdx))} className="text-red-500/50 hover:text-red-500 shrink-0 sm:opacity-0 group-hover/rule:opacity-100 transition-opacity">
-                                <Trash2 size={13} />
-                              </button>
-                            </div>
-                          ))}
-                          <button 
-                            onClick={() => updateRules([...rules, { logic: 'or', value: '' }])}
-                            className="text-[10px] text-technical-cyan/70 hover:text-technical-cyan hover:bg-technical-cyan/10 self-start px-2 py-1 rounded transition-colors flex items-center gap-1"
-                          >
-                            <Plus size={12} /> 添加规则
-                          </button>
-                        </div>
-                      );
-                    })()}
-                  </div>
-                ) : (
-                  <input type="text" value={group.filter}
-                    onChange={(e) => setGroups(groups.map(g => g.id === group.id ? { ...g, filter: e.target.value } : g))}
-                    onBlur={(e) => handleUpdateGroup(group.id, { filter: e.target.value })}
-                    placeholder="留空则不筛选"
-                    className="flex-1 bg-black/40 border border-technical-border rounded-sm px-3 py-1 font-mono text-xs text-technical-cyan focus:outline-none focus:border-technical-cyan/30 transition-all"
-                  />
-                )}
-                <button
-                  onClick={() => handleFetchProxies(group.id)}
-                  disabled={loadingProxies[group.id]}
-                  className="technical-button-outline py-1 px-3 text-[10px] shrink-0 disabled:opacity-50"
-                >
-                  {loadingProxies[group.id] ? <Activity size={12} className="animate-spin" /> : <RefreshCw size={12} />}
-                  <span className="ml-1">{loadingProxies[group.id] ? '获取中...' : '测试过滤'}</span>
-                </button>
-              </div>
-              {proxyCache[group.id] && (
-                <div className="bg-black/60 border border-technical-border/50 rounded p-2 text-xs font-mono max-h-40 overflow-y-auto">
-                  <div className="text-[10px] text-technical-muted mb-2 border-b border-technical-border/30 pb-1 flex justify-between">
-                    <span>总计 {proxyCache[group.id].length} 个节点</span>
-                    <span>
-                      已过滤出 {proxyCache[group.id].filter(p => {
-                        try { 
-                          const pattern = compileFilter(group.filter);
-                          return !pattern || new RegExp(pattern).test(p); 
-                        }
-                        catch { return false; }
-                      }).length} 个
-                    </span>
-                  </div>
-                  <div className="flex flex-wrap gap-1.5">
-                    {proxyCache[group.id].map((p, idx) => {
-                      let isMatch = true;
-                      try {
-                        const pattern = compileFilter(group.filter);
-                        isMatch = !pattern || new RegExp(pattern).test(p);
-                      } catch {
-                        isMatch = false;
-                      }
-                      return (
-                        <span key={idx} className={`px-1.5 py-0.5 rounded-sm text-[10px] ${isMatch ? 'bg-technical-cyan/20 text-technical-cyan border border-technical-cyan/30' : 'bg-zinc-800 text-zinc-500 line-through border border-transparent'}`}>
-                          {p}
-                        </span>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* URL 列表 */}
-            <div className="flex flex-col bg-black/20">
-              {group.urls.map((entry, i) => {
-                const key = urlKey(group.id, i);
-                const isExpanded = expandedKey === key;
-                const isDragging = dragInfo?.groupId === group.id && dragInfo?.index === i;
-                const isDragOver = dragInfo?.groupId === group.id && dragOverIndex === i;
-                return (
-                  <div
-                    key={i}
-                    draggable={isDragging}
-                    onDragStart={(e) => {
-                      e.dataTransfer.effectAllowed = 'move';
-                    }}
-                    onDragOver={(e) => {
-                      e.preventDefault();
-                      if (dragInfo && dragInfo.groupId === group.id && dragInfo.index !== i) {
-                        setDragOverIndex(i);
-                      }
-                    }}
-                    onDragEnd={() => {
-                      if (dragInfo && dragOverIndex !== null && dragInfo.index !== dragOverIndex) {
-                        const newUrls = [...group.urls];
-                        const [removed] = newUrls.splice(dragInfo.index, 1);
-                        newUrls.splice(dragOverIndex, 0, removed);
-                        
-                        setGroups(groups.map(g => g.id === group.id ? { ...g, urls: newUrls } : g));
-                        handleUpdateGroup(group.id, { urls: newUrls });
-                      }
-                      setDragInfo(null);
-                      setDragOverIndex(null);
-                    }}
-                    className={`border-b border-technical-border/30 last:border-0 transition-all ${
-                      isDragging ? 'opacity-40 bg-zinc-900/50' : ''
-                    } ${
-                      isDragOver ? 'border-t-2 border-t-technical-cyan bg-technical-cyan/5' : ''
-                    }`}
-                  >
-                    {/* URL 主行 */}
-                    <div className="group/row flex items-center gap-2 px-4 py-2.5 hover:bg-white/5 transition-colors">
-                      <GripVertical
-                        size={15}
-                        className="text-zinc-800 cursor-grab active:cursor-grabbing group-hover/row:text-zinc-600 shrink-0"
-                        onMouseDown={() => {
-                          setDragInfo({ groupId: group.id, index: i });
-                        }}
-                        onMouseUp={() => {
-                          if (dragInfo && dragOverIndex === null) {
-                            setDragInfo(null);
+                {proxyCache[group.id] && (
+                  <div className="bg-black/60 border border-technical-border/50 rounded p-2 text-xs font-mono max-h-40 overflow-y-auto">
+                    <div className="text-[10px] text-technical-muted mb-2 border-b border-technical-border/30 pb-1 flex justify-between">
+                      <span>总计 {proxyCache[group.id].length} 个节点</span>
+                      <span>
+                        已过滤出 {proxyCache[group.id].filter(p => {
+                          try { 
+                            const pattern = compileFilter(group.filter);
+                            return !pattern || new RegExp(pattern).test(p); 
                           }
-                        }}
-                      />
-                      {/* URL 输入 */}
-                      <input type="text" value={entry.url}
-                        onChange={(e) => setUrlField(group.id, i, 'url', e.target.value)}
-                        onBlur={() => saveUrls(group.id)}
-                        className="flex-1 min-w-0 bg-transparent border-none p-0 font-mono text-xs text-gray-400 focus:ring-0 outline-none truncate"
-                      />
-                      {/* 最近刷新指示 */}
-                      {entry.lastRefreshedAt && (
-                        <Clock size={11} className="text-zinc-600 shrink-0" title={`最近刷新: ${new Date(entry.lastRefreshedAt).toLocaleString('zh-CN')}`} />
-                      )}
-                      {/* provider 名称 */}
-                      <input type="text" value={entry.name ?? ''}
-                        onChange={(e) => setUrlField(group.id, i, 'name', e.target.value)}
-                        onBlur={() => saveUrls(group.id)}
-                        placeholder="名称"
-                        title="Provider 名称（对应模板 use: [name]）"
-                        className="w-20 bg-zinc-900 border border-technical-border/50 rounded-sm px-2 py-0.5 font-mono text-[11px] text-technical-cyan focus:outline-none focus:border-technical-cyan/50 shrink-0"
-                      />
-                      {/* proxy-group 分组名 */}
-                      <input type="text" value={entry.proxyGroup ?? ''}
-                        onChange={(e) => setUrlField(group.id, i, 'proxyGroup', e.target.value)}
-                        onBlur={() => saveUrls(group.id)}
-                        placeholder="分组名"
-                        title="所属 proxy-group 名（对应模板 {{URL_GROUPS}}）"
-                        className="w-20 bg-zinc-900 border border-amber-700/40 rounded-sm px-2 py-0.5 font-mono text-[11px] text-amber-400 focus:outline-none focus:border-amber-500/60 shrink-0"
-                      />
-                      {/* 行内图标选择 */}
-                      <div className="flex items-center gap-1 shrink-0">
-                        {/* 图标预览 */}
+                          catch { return false; }
+                        }).length} 个
+                      </span>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {proxyCache[group.id].map((p, idx) => {
+                        let isMatch = true;
+                        try {
+                          const pattern = compileFilter(group.filter);
+                          isMatch = !pattern || new RegExp(pattern).test(p);
+                        } catch {
+                          isMatch = false;
+                        }
+                        return (
+                          <span key={idx} className={`px-1.5 py-0.5 rounded-sm text-[10px] ${isMatch ? 'bg-technical-cyan/20 text-technical-cyan border border-technical-cyan/30' : 'bg-zinc-800 text-zinc-500 line-through border border-transparent'}`}>
+                            {p}
+                          </span>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* 已选订阅源列表（支持拖拽排序） */}
+              <div className="flex flex-col bg-black/20">
+                <div className="px-4 py-2 border-b border-technical-border/20 text-[10px] font-display font-bold uppercase tracking-widest text-technical-muted">
+                  已关联订阅源 (拖拽手 Gird 排序):
+                </div>
+                {group.urls.map((entry, i) => {
+                  const key = `group-url-${group.id}-${entry.id}-${i}`;
+                  const isDragging = dragInfo?.groupId === group.id && dragInfo?.index === i;
+                  const isDragOver = dragInfo?.groupId === group.id && dragOverIndex === i;
+                  
+                  return (
+                    <div
+                      key={key}
+                      draggable={isDragging}
+                      onDragStart={(e) => {
+                        e.dataTransfer.effectAllowed = 'move';
+                      }}
+                      onDragOver={(e) => {
+                        e.preventDefault();
+                        if (dragInfo && dragInfo.groupId === group.id && dragInfo.index !== i) {
+                          setDragOverIndex(i);
+                        }
+                      }}
+                      onDragEnd={() => {
+                        if (dragInfo && dragOverIndex !== null && dragInfo.index !== dragOverIndex) {
+                          const newUrlIds = [...group.urlIds];
+                          const [removed] = newUrlIds.splice(dragInfo.index, 1);
+                          newUrlIds.splice(dragOverIndex, 0, removed);
+                          
+                          // 同时更新 urls 本地列表，保持前端显示一致
+                          const newUrls = [...group.urls];
+                          const [removedUrl] = newUrls.splice(dragInfo.index, 1);
+                          newUrls.splice(dragOverIndex, 0, removedUrl);
+
+                          setGroups(groups.map(g => g.id === group.id ? { ...g, urlIds: newUrlIds, urls: newUrls } : g));
+                          handleUpdateGroup(group.id, { urlIds: newUrlIds });
+                        }
+                        setDragInfo(null);
+                        setDragOverIndex(null);
+                      }}
+                      className={`border-b border-technical-border/30 last:border-0 transition-all ${
+                        isDragging ? 'opacity-40 bg-zinc-900/50' : ''
+                      } ${
+                        isDragOver ? 'border-t-2 border-t-technical-cyan bg-technical-cyan/5' : ''
+                      }`}
+                    >
+                      <div className="flex items-center gap-4 px-4 py-2.5 hover:bg-white/5 transition-colors">
+                        <GripVertical
+                          size={15}
+                          className="text-zinc-800 cursor-grab active:cursor-grabbing hover:text-zinc-600 shrink-0"
+                          onMouseDown={() => setDragInfo({ groupId: group.id, index: i })}
+                          onMouseUp={() => dragInfo && dragOverIndex === null && setDragInfo(null)}
+                        />
                         <div className="w-5 h-5 flex items-center justify-center shrink-0">
                           {entry.icon ? (
                             <img
@@ -784,249 +826,410 @@ function SubscriptionsView() {
                             <span className="text-zinc-700 text-[10px]">☆</span>
                           )}
                         </div>
-                        <select
-                          value={entry.icon ?? ''}
-                          onChange={(e) => {
-                            const newIcon = e.target.value || undefined;
-                            const newUrls = group.urls.map((u, j) =>
-                              j === i ? { ...u, icon: newIcon } : u
-                            );
-                            setGroups(groups.map(g => g.id !== group.id ? g : { ...g, urls: newUrls }));
-                            handleUpdateGroup(group.id, { urls: newUrls });
-                          }}
-                          title="分组图标"
-                          className="w-24 bg-zinc-900 border border-amber-700/40 rounded-sm px-1 py-0.5 font-mono text-[11px] text-amber-400 focus:outline-none focus:border-amber-500/60"
-                        >
-                          <option value="">—</option>
-                          <optgroup label="通用">
-                            <option value="Auto">Auto（自动）</option>
-                            <option value="Proxy">Proxy（代理）</option>
-                            <option value="Global">Global（全局）</option>
-                            <option value="Final">Final（兜底）</option>
-                            <option value="Server">Server（服务器）</option>
-                            <option value="Speedtest">Speedtest（测速）</option>
-                            <option value="Direct">Direct（直连）</option>
-                            <option value="Bypass">Bypass（绕过）</option>
-                            <option value="Blackhole">Blackhole（屏蔽）</option>
-                            <option value="Advertising">Advertising（广告）</option>
-                            <option value="Airport">Airport（机场）</option>
-                            <option value="Area">Area（地区）</option>
-                            <option value="Available">Available（可用）</option>
-                            <option value="Bot">Bot（机器人）</option>
-                            <option value="Download">Download（下载）</option>
-                            <option value="Domestic">Domestic（国内）</option>
-                          </optgroup>
-                          <optgroup label="AI / 工具">
-                            <option value="AI">AI</option>
-                            <option value="ChatGPT">ChatGPT</option>
-                            <option value="Copilot">Copilot</option>
-                            <option value="Azure">Azure</option>
-                            <option value="Cloudflare">Cloudflare</option>
-                          </optgroup>
-                          <optgroup label="流媒体">
-                            <option value="YouTube">YouTube</option>
-                            <option value="Netflix">Netflix</option>
-                            <option value="Spotify">Spotify</option>
-                            <option value="Disney+">Disney+</option>
-                            <option value="Apple_TV">Apple TV</option>
-                            <option value="Apple_TV_Plus">Apple TV+</option>
-                            <option value="Apple_Music">Apple Music</option>
-                            <option value="AbemaTV">AbemaTV</option>
-                            <option value="AfreecaTV">AfreecaTV</option>
-                            <option value="BBC_iPlayer">BBC iPlayer</option>
-                            <option value="DAZN">DAZN</option>
-                            <option value="All4">All4</option>
-                            <option value="Bahamut">Bahamut</option>
-                            <option value="bilibili">bilibili</option>
-                            <option value="DomesticMedia">国内媒体</option>
-                          </optgroup>
-                          <optgroup label="社交">
-                            <option value="Telegram">Telegram</option>
-                            <option value="Twitter">Twitter</option>
-                            <option value="Discord">Discord</option>
-                            <option value="Clubhouse">Clubhouse</option>
-                          </optgroup>
-                          <optgroup label="购物 / 其他">
-                            <option value="Google_Search">Google</option>
-                            <option value="Github">Github</option>
-                            <option value="Amazon">Amazon</option>
-                            <option value="Apple">Apple</option>
-                            <option value="Alibaba">Alibaba</option>
-                            <option value="App_Store">App Store</option>
-                            <option value="Cryptocurrency">Cryptocurrency</option>
-                          </optgroup>
-                          <optgroup label="地区">
-                            <option value="HK">🇭🇰 香港</option>
-                            <option value="TW">🇹🇼 台湾</option>
-                            <option value="JP">🇯🇵 日本</option>
-                            <option value="US">🇺🇸 美国</option>
-                            <option value="SG">🇸🇬 新加坡</option>
-                            <option value="DE">🇩🇪 德国</option>
-                            <option value="CA">🇨🇦 加拿大</option>
-                            <option value="AU">🇦🇺 澳大利亚</option>
-                            <option value="BR">🇧🇷 巴西</option>
-                            <option value="AR">🇦🇷 阿根廷</option>
-                            <option value="IN">🇮🇳 印度</option>
-                            <option value="KR">🇰🇷 韩国</option>
-                            <option value="FR">🇫🇷 法国</option>
-                            <option value="GB">🇬🇧 英国</option>
-                            <option value="NL">🇳🇱 荷兰</option>
-                            <option value="China_Map">🇨🇳 中国大陆</option>
-                            <option value="China">中国</option>
-                            <option value="Asia_Map">亚洲</option>
-                            <option value="America_Map">美洲</option>
-                            <option value="Africa_Map">非洲</option>
-                            <option value="Australia">大洋洲</option>
-                          </optgroup>
-                        </select>
-                      </div>
-                      {/* 展开刷新配置 */}
-                      <button
-                        onClick={() => setExpandedKey(isExpanded ? null : key)}
-                        className={`p-1 shrink-0 transition-colors ${entry.refreshUrl ? 'text-technical-cyan/70 hover:text-technical-cyan' : 'text-zinc-700 hover:text-technical-muted'}`}
-                        title="配置自动刷新"
-                      >
-                        <ChevronDown size={14} className={`transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
-                      </button>
-                      {/* 删除 */}
-                      <button
-                        onClick={() => handleUpdateGroup(group.id, { urls: group.urls.filter((_, idx) => idx !== i) })}
-                        className="p-1 text-technical-muted hover:text-red-500 transition-colors opacity-0 group-hover/row:opacity-100 shrink-0"
-                      ><Trash2 size={13} /></button>
-                    </div>
-
-                    {/* 展开：自动刷新配置 */}
-                    {isExpanded && (
-                      <div className="px-10 pb-3 pt-2 space-y-2.5 bg-black/40 border-t border-technical-border/20">
-                        <p className="text-[9px] font-mono text-zinc-600">每天 UTC 00:00 自动请求以下接口获取最新订阅 URL 并覆写本条目</p>
-                        <div>
-                          <label className="block text-[9px] font-display text-technical-muted uppercase tracking-widest mb-1">接口地址 (refreshUrl)</label>
-                          <input type="text" value={entry.refreshUrl ?? ''}
-                            onChange={(e) => setUrlField(group.id, i, 'refreshUrl', e.target.value)}
-                            onBlur={() => saveUrls(group.id)}
-                            placeholder="https://example.com/api/getSubscribe"
-                            className="w-full bg-black/40 border border-technical-border rounded-sm px-2.5 py-1.5 font-mono text-xs text-gray-300 focus:outline-none focus:border-technical-cyan/50"
-                          />
+                        <div className="flex-1 min-w-0">
+                          <div className="text-xs font-bold text-gray-200 truncate">{entry.name || '未命名'}</div>
+                          <div className="text-[10px] font-mono text-technical-muted truncate opacity-80 mt-0.5">{entry.url}</div>
                         </div>
-                        <div>
-                          <label className="block text-[9px] font-display text-technical-muted uppercase tracking-widest mb-1">解析类型 (refreshType)</label>
-                          <select
-                            value={entry.refreshType ?? ''}
-                            onChange={(e) => {
-                              const val = e.target.value || undefined;
-                              setUrlField(group.id, i, 'refreshType', val);
-                              const g = groups.find(x => x.id === group.id);
-                              if (g) {
-                                const newUrls = g.urls.map((u, j) => j === i ? { ...u, refreshType: val } : u);
-                                handleUpdateGroup(group.id, { urls: newUrls });
-                              }
-                            }}
-                            className="w-full bg-black/40 border border-technical-border rounded-sm px-2.5 py-1.5 font-mono text-xs text-gray-300 focus:outline-none focus:border-technical-cyan/50"
-                          >
-                            <option value="">默认 (直接提取订阅接口返回的 JSON)</option>
-                            <option value="hoshi_v2board">Hoshi 动态跳转 (如 Xsus，提供 Portal 地址及账号密码)</option>
-                            <option value="v2board">普通 V2Board (直接登录，提供 API 根地址及账号密码)</option>
-                          </select>
-                        </div>
-                        <div>
-                          <label className="block text-[9px] font-display text-technical-muted uppercase tracking-widest mb-1">请求头 JSON (refreshHeaders - 选填)</label>
-                          <textarea rows={2}
-                            value={entry.refreshHeaders ? JSON.stringify(entry.refreshHeaders, null, 2) : ''}
-                            onChange={(e) => { try { setUrlField(group.id, i, 'refreshHeaders', e.target.value ? JSON.parse(e.target.value) : undefined); } catch {} }}
-                            onBlur={(e) => { try { setUrlField(group.id, i, 'refreshHeaders', e.target.value ? JSON.parse(e.target.value) : undefined); saveUrls(group.id); } catch { alert('JSON 格式错误'); } }}
-                            placeholder={'{\n  "authorization": "Bearer xxx"\n}'}
-                            className="w-full bg-black/40 border border-technical-border rounded-sm px-2.5 py-1.5 font-mono text-xs text-gray-300 focus:outline-none focus:border-technical-cyan/50 resize-none"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-[9px] font-display text-technical-muted uppercase tracking-widest mb-1">响应字段路径 (refreshJsonPath - 选填)</label>
-                          <input type="text" value={entry.refreshJsonPath ?? ''}
-                            onChange={(e) => setUrlField(group.id, i, 'refreshJsonPath', e.target.value)}
-                            onBlur={() => saveUrls(group.id)}
-                            placeholder="subscribe_url  或  data.subscribe_url"
-                            className="w-full bg-black/40 border border-technical-border rounded-sm px-2.5 py-1.5 font-mono text-xs text-gray-300 focus:outline-none focus:border-technical-cyan/50"
-                          />
-                        </div>
-
-                        {/* Hysteria 2 微调参数 */}
-                        <div className="pt-2 border-t border-technical-border/20 space-y-2">
-                          <label className="block text-[10px] font-display font-bold text-amber-400 uppercase tracking-widest">Hysteria 2 客户端微调参数 (仅对该订阅中的 Hysteria 2 节点生效)</label>
-                          <div className="grid grid-cols-3 gap-3">
-                            <div>
-                              <label className="block text-[9px] font-display text-technical-muted uppercase tracking-widest mb-1">上传速度限制 (up)</label>
-                              <input type="text" value={entry.hysteria2Up ?? ''}
-                                onChange={(e) => setUrlField(group.id, i, 'hysteria2Up', e.target.value)}
-                                onBlur={() => saveUrls(group.id)}
-                                placeholder="如: 30 Mbps"
-                                className="w-full bg-black/40 border border-technical-border rounded-sm px-2.5 py-1.5 font-mono text-xs text-gray-300 focus:outline-none focus:border-technical-cyan/50"
-                              />
-                            </div>
-                            <div>
-                              <label className="block text-[9px] font-display text-technical-muted uppercase tracking-widest mb-1">下载速度限制 (down)</label>
-                              <input type="text" value={entry.hysteria2Down ?? ''}
-                                onChange={(e) => setUrlField(group.id, i, 'hysteria2Down', e.target.value)}
-                                onBlur={() => saveUrls(group.id)}
-                                placeholder="如: 150 Mbps"
-                                className="w-full bg-black/40 border border-technical-border rounded-sm px-2.5 py-1.5 font-mono text-xs text-gray-300 focus:outline-none focus:border-technical-cyan/50"
-                              />
-                            </div>
-                            <div>
-                              <label className="block text-[9px] font-display text-technical-muted uppercase tracking-widest mb-1">MTU 限制 (mtu)</label>
-                              <input type="number" value={entry.hysteria2Mtu ?? ''}
-                                onChange={(e) => {
-                                  const val = e.target.value ? parseInt(e.target.value, 10) : undefined;
-                                  setUrlField(group.id, i, 'hysteria2Mtu', val);
-                                }}
-                                onBlur={() => saveUrls(group.id)}
-                                placeholder="如: 1350"
-                                className="w-full bg-black/40 border border-technical-border rounded-sm px-2.5 py-1.5 font-mono text-xs text-gray-300 focus:outline-none focus:border-technical-cyan/50"
-                              />
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className="flex items-center gap-3 pt-0.5">
+                        <div className="flex items-center gap-3 shrink-0">
+                          {entry.proxyGroup && (
+                            <span className="px-2 py-0.5 bg-amber-900/20 border border-amber-700/30 text-[10px] font-mono text-amber-400 rounded-sm">
+                              {entry.proxyGroup}
+                            </span>
+                          )}
                           <button
-                            onClick={() => handleUrlRefresh(group.id, i)}
-                            disabled={!entry.refreshUrl || refreshingKey === key}
-                            className="technical-button-primary py-1 px-3 text-xs gap-1.5 disabled:opacity-40"
+                            onClick={() => {
+                              const newUrlIds = group.urlIds.filter(id => id !== entry.id);
+                              const newUrls = group.urls.filter(u => u.id !== entry.id);
+                              setGroups(groups.map(g => g.id === group.id ? { ...g, urlIds: newUrlIds, urls: newUrls } : g));
+                              handleUpdateGroup(group.id, { urlIds: newUrlIds });
+                            }}
+                            className="p-1 text-technical-muted hover:text-red-500 transition-colors"
+                            title="取消关联"
                           >
-                            <RefreshCw size={12} className={refreshingKey === key ? 'animate-spin' : ''} />
-                            <span>{refreshingKey === key ? '刷新中...' : '立即刷新'}</span>
+                            <Trash2 size={13} />
                           </button>
-                          {urlMsg?.key === key && (
-                            <span className={`text-xs font-mono flex items-center gap-1 ${urlMsg.ok ? 'text-green-400' : 'text-red-400'}`}>
-                              {urlMsg.ok ? <CheckCircle2 size={12} /> : <AlertTriangle size={12} />}
-                              <span className="truncate max-w-xs">{urlMsg.text}</span>
-                            </span>
-                          )}
-                          {entry.lastRefreshedAt && (
-                            <span className="text-[9px] font-mono text-zinc-600 flex items-center gap-1 ml-auto">
-                              <Clock size={9} />{new Date(entry.lastRefreshedAt).toLocaleString('zh-CN')}
-                            </span>
-                          )}
                         </div>
                       </div>
+                    </div>
+                  );
+                })}
+                {group.urlIds.length === 0 && (
+                  <div className="text-center p-6 text-[10px] text-technical-muted font-mono">暂无关联的订阅源，请在下方选择</div>
+                )}
+              </div>
+
+              {/* 订阅源勾选选择器 */}
+              <div className="p-4 border-t border-technical-border/30 bg-black/40">
+                <div className="text-[10px] font-display font-bold uppercase tracking-widest text-technical-muted mb-2">
+                  选择并关联订阅源:
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
+                  {globalUrls.map((source) => {
+                    const isChecked = group.urlIds.includes(source.id);
+                    return (
+                      <label
+                        key={source.id}
+                        className={`flex items-start gap-2.5 p-2 border rounded-sm cursor-pointer select-none transition-all ${
+                          isChecked 
+                            ? 'bg-technical-cyan/5 border-technical-cyan/40 text-gray-200' 
+                            : 'bg-zinc-900/40 border-technical-border/50 text-technical-muted hover:text-gray-300 hover:border-zinc-800'
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={(e) => {
+                            let newUrlIds = [...group.urlIds];
+                            if (e.target.checked) {
+                              if (!newUrlIds.includes(source.id)) newUrlIds.push(source.id);
+                            } else {
+                              newUrlIds = newUrlIds.filter(id => id !== source.id);
+                            }
+                            
+                            // 更新 resolved urls
+                            const newUrls = newUrlIds.map(id => globalUrls.find(u => u.id === id)).filter(Boolean) as api.UrlEntry[];
+
+                            setGroups(groups.map(g => g.id === group.id ? { ...g, urlIds: newUrlIds, urls: newUrls } : g));
+                            handleUpdateGroup(group.id, { urlIds: newUrlIds });
+                          }}
+                          className="sr-only"
+                        />
+                        <div className={`w-3.5 h-3.5 border rounded-sm shrink-0 mt-0.5 flex items-center justify-center transition-colors ${
+                          isChecked ? 'bg-technical-cyan border-technical-cyan text-black' : 'border-zinc-700 bg-black'
+                        }`}>
+                          {isChecked && <span className="text-[8px] leading-none font-bold">✓</span>}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="text-[11px] font-bold truncate">{source.name || '未命名'}</div>
+                          <div className="text-[9px] font-mono opacity-60 truncate mt-0.5">{source.url}</div>
+                        </div>
+                      </label>
+                    );
+                  })}
+                  {globalUrls.length === 0 && (
+                    <div className="col-span-full text-xs text-technical-muted py-2">
+                      暂无可用订阅源，请先在右上角「订阅源管理」中添加。
+                    </div>
+                  )}
+                </div>
+              </div>
+            </section>
+          ))}
+          {groups.length === 0 && (
+            <div className="text-center p-10 text-technical-muted border border-dashed border-technical-border rounded">暂无订阅组，请添加</div>
+          )}
+        </div>
+      ) : (
+        <div className="space-y-6 animate-fadeIn">
+          {globalUrls.map((source) => {
+            const key = `source-${source.id}`;
+            const isExpanded = expandedKey === key;
+            const refKey = source.id;
+
+            return (
+              <div key={source.id} className="technical-card flex flex-col bg-zinc-950">
+                <div className="group/row flex items-center gap-3 px-4 py-3 hover:bg-white/2 transition-colors border-b border-technical-border/30">
+                  <div className="w-6 h-6 bg-zinc-900 border border-technical-border flex items-center justify-center text-technical-cyan shrink-0 rounded-sm">
+                    {source.icon ? (
+                      <img
+                        src={`https://gh-proxy.com/raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/${source.icon}.png`}
+                        alt={source.icon}
+                        className="w-4 h-4 object-contain"
+                        onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                      />
+                    ) : (
+                      <span className="text-zinc-500 text-[10px]">URL</span>
                     )}
                   </div>
-                );
-              })}
+                  
+                  {/* Alias Name */}
+                  <input
+                    type="text"
+                    value={source.name ?? ''}
+                    onChange={(e) => setGlobalUrls(globalUrls.map(u => u.id === source.id ? { ...u, name: e.target.value } : u))}
+                    onBlur={(e) => handleUpdateSource(source.id, { name: e.target.value })}
+                    placeholder="订阅源别名"
+                    className="w-36 bg-zinc-900 border border-technical-border/50 rounded-sm px-2.5 py-1 font-mono text-xs text-technical-cyan focus:outline-none focus:border-technical-cyan/50 shrink-0"
+                  />
 
-              <div className="p-4">
-                <button
-                  onClick={() => handleUpdateGroup(group.id, { urls: [...group.urls, { url: 'https://' }] })}
-                  className="flex items-center gap-2 text-[10px] font-display font-bold uppercase tracking-widest text-technical-cyan/70 hover:text-technical-cyan transition-colors bg-technical-cyan/5 px-3 py-1.5 rounded-sm w-fit"
-                >
-                  <Plus size={14} /><span>添加源 URL</span>
-                </button>
+                  {/* URL Input */}
+                  <input
+                    type="text"
+                    value={source.url}
+                    onChange={(e) => setGlobalUrls(globalUrls.map(u => u.id === source.id ? { ...u, url: e.target.value } : u))}
+                    onBlur={(e) => handleUpdateSource(source.id, { url: e.target.value.trim() })}
+                    placeholder="https://..."
+                    className="flex-1 min-w-0 bg-transparent border-none p-0 font-mono text-xs text-gray-300 focus:ring-0 outline-none truncate"
+                  />
+
+                  {source.lastRefreshedAt && (
+                    <Clock size={11} className="text-zinc-600 shrink-0" title={`最近刷新: ${new Date(source.lastRefreshedAt).toLocaleString('zh-CN')}`} />
+                  )}
+
+                  {/* proxyGroup */}
+                  <input
+                    type="text"
+                    value={source.proxyGroup ?? ''}
+                    onChange={(e) => setGlobalUrls(globalUrls.map(u => u.id === source.id ? { ...u, proxyGroup: e.target.value } : u))}
+                    onBlur={(e) => handleUpdateSource(source.id, { proxyGroup: e.target.value || undefined })}
+                    placeholder="分组名"
+                    title="所属 proxy-group 名（对应模板 {{URL_GROUPS}}）"
+                    className="w-24 bg-zinc-900 border border-amber-700/40 rounded-sm px-2 py-0.5 font-mono text-[11px] text-amber-400 focus:outline-none focus:border-amber-500/60 shrink-0"
+                  />
+
+                  {/* Icon select */}
+                  <select
+                    value={source.icon ?? ''}
+                    onChange={(e) => handleUpdateSource(source.id, { icon: e.target.value || undefined })}
+                    className="w-24 bg-zinc-900 border border-amber-700/40 rounded-sm px-1 py-0.5 font-mono text-[11px] text-amber-400 focus:outline-none focus:border-amber-500/60 shrink-0"
+                  >
+                    <option value="">—</option>
+                    <optgroup label="通用">
+                      <option value="Auto">Auto（自动）</option>
+                      <option value="Proxy">Proxy（代理）</option>
+                      <option value="Global">Global（全局）</option>
+                      <option value="Final">Final（兜底）</option>
+                      <option value="Server">Server（服务器）</option>
+                      <option value="Speedtest">Speedtest（测速）</option>
+                      <option value="Direct">Direct（直连）</option>
+                      <option value="Bypass">Bypass（绕过）</option>
+                      <option value="Blackhole">Blackhole（屏蔽）</option>
+                      <option value="Advertising">Advertising（广告）</option>
+                      <option value="Airport">Airport（机场）</option>
+                      <option value="Area">Area（地区）</option>
+                      <option value="Available">Available（可用）</option>
+                      <option value="Bot">Bot（机器人）</option>
+                      <option value="Download">Download（下载）</option>
+                      <option value="Domestic">Domestic（国内）</option>
+                    </optgroup>
+                    <optgroup label="AI / 工具">
+                      <option value="AI">AI</option>
+                      <option value="ChatGPT">ChatGPT</option>
+                      <option value="Copilot">Copilot</option>
+                      <option value="Azure">Azure</option>
+                      <option value="Cloudflare">Cloudflare</option>
+                    </optgroup>
+                    <optgroup label="流媒体">
+                      <option value="YouTube">YouTube</option>
+                      <option value="Netflix">Netflix</option>
+                      <option value="Spotify">Spotify</option>
+                      <option value="Disney+">Disney+</option>
+                      <option value="Apple_TV">Apple TV</option>
+                      <option value="Apple_TV_Plus">Apple TV+</option>
+                      <option value="Apple_Music">Apple Music</option>
+                      <option value="AbemaTV">AbemaTV</option>
+                      <option value="AfreecaTV">AfreecaTV</option>
+                      <option value="BBC_iPlayer">BBC iPlayer</option>
+                      <option value="DAZN">DAZN</option>
+                      <option value="All4">All4</option>
+                      <option value="Bahamut">Bahamut</option>
+                      <option value="bilibili">bilibili</option>
+                      <option value="DomesticMedia">国内媒体</option>
+                    </optgroup>
+                    <optgroup label="社交">
+                      <option value="Telegram">Telegram</option>
+                      <option value="Twitter">Twitter</option>
+                      <option value="Discord">Discord</option>
+                      <option value="Clubhouse">Clubhouse</option>
+                    </optgroup>
+                    <optgroup label="购物 / 其他">
+                      <option value="Google_Search">Google</option>
+                      <option value="Github">Github</option>
+                      <option value="Amazon">Amazon</option>
+                      <option value="Apple">Apple</option>
+                      <option value="Alibaba">Alibaba</option>
+                      <option value="App_Store">App Store</option>
+                      <option value="Cryptocurrency">Cryptocurrency</option>
+                    </optgroup>
+                    <optgroup label="地区">
+                      <option value="HK">🇭🇰 香港</option>
+                      <option value="TW">🇹🇼 台湾</option>
+                      <option value="JP">🇯🇵 日本</option>
+                      <option value="US">🇺🇸 美国</option>
+                      <option value="SG">🇸🇬 新加坡</option>
+                      <option value="DE">🇩🇪 德国</option>
+                      <option value="CA">🇨🇦 加拿大</option>
+                      <option value="AU">🇦🇺 澳大利亚</option>
+                      <option value="BR">🇧🇷 巴西</option>
+                      <option value="AR">🇦🇷 阿根廷</option>
+                      <option value="IN">🇮🇳 印度</option>
+                      <option value="KR">🇰🇷 韩国</option>
+                      <option value="FR">🇫🇷 法国</option>
+                      <option value="GB">🇬🇧 英国</option>
+                      <option value="NL">🇳🇱 荷兰</option>
+                      <option value="China_Map">🇨🇳 中国大陆</option>
+                      <option value="China">中国</option>
+                      <option value="Asia_Map">亚洲</option>
+                      <option value="America_Map">美洲</option>
+                      <option value="Africa_Map">非洲</option>
+                      <option value="Australia">大洋洲</option>
+                    </optgroup>
+                  </select>
+
+                  {/* Expand config */}
+                  <button
+                    onClick={() => setExpandedKey(isExpanded ? null : key)}
+                    className={`p-1 shrink-0 transition-colors ${source.refreshUrl ? 'text-technical-cyan/70 hover:text-technical-cyan' : 'text-zinc-700 hover:text-technical-muted'}`}
+                    title="配置自动刷新"
+                  >
+                    <ChevronDown size={14} className={`transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+                  </button>
+
+                  {/* Delete */}
+                  <button
+                    onClick={() => handleDeleteSource(source.id)}
+                    className="p-1 text-technical-muted hover:text-red-500 transition-colors opacity-0 group-hover/row:opacity-100 shrink-0"
+                    title="删除订阅源"
+                  >
+                    <Trash2 size={13} />
+                  </button>
+                </div>
+
+                {/* Expanded settings */}
+                {isExpanded && (
+                  <div className="px-12 pb-4 pt-3 space-y-3 bg-black/40 border-b border-technical-border/20 animate-fadeIn">
+                    <p className="text-[9px] font-mono text-zinc-500">每天 UTC 00:00 自动请求以下接口获取最新订阅并更新</p>
+                    
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-[9px] font-display text-technical-muted uppercase tracking-widest mb-1">接口地址 (refreshUrl)</label>
+                        <input
+                          type="text"
+                          value={source.refreshUrl ?? ''}
+                          onChange={(e) => setGlobalUrls(globalUrls.map(u => u.id === source.id ? { ...u, refreshUrl: e.target.value } : u))}
+                          onBlur={(e) => handleUpdateSource(source.id, { refreshUrl: e.target.value.trim() || undefined })}
+                          placeholder="https://example.com/api/getSubscribe"
+                          className="w-full bg-black/40 border border-technical-border rounded-sm px-2.5 py-1.5 font-mono text-xs text-gray-300 focus:outline-none focus:border-technical-cyan/50"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[9px] font-display text-technical-muted uppercase tracking-widest mb-1">解析类型 (refreshType)</label>
+                        <select
+                          value={source.refreshType ?? ''}
+                          onChange={(e) => handleUpdateSource(source.id, { refreshType: e.target.value || undefined })}
+                          className="w-full bg-black/40 border border-technical-border rounded-sm px-2.5 py-1.5 font-mono text-xs text-gray-300 focus:outline-none focus:border-technical-cyan/50"
+                        >
+                          <option value="">默认 (直接提取订阅接口返回的 JSON)</option>
+                          <option value="hoshi_v2board">Hoshi 动态跳转 (如 Xsus，提供 Portal 地址及账号密码)</option>
+                          <option value="v2board">普通 V2Board (直接登录，提供 API 根地址及账号密码)</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-[9px] font-display text-technical-muted uppercase tracking-widest mb-1">请求头 JSON (refreshHeaders - 选填)</label>
+                        <textarea
+                          rows={2}
+                          value={source.refreshHeaders ? JSON.stringify(source.refreshHeaders, null, 2) : ''}
+                          onChange={(e) => {
+                            try {
+                              const parsed = e.target.value ? JSON.parse(e.target.value) : undefined;
+                              setGlobalUrls(globalUrls.map(u => u.id === source.id ? { ...u, refreshHeaders: parsed } : u));
+                            } catch {}
+                          }}
+                          onBlur={(e) => {
+                            try {
+                              const parsed = e.target.value ? JSON.parse(e.target.value) : undefined;
+                              handleUpdateSource(source.id, { refreshHeaders: parsed });
+                            } catch {
+                              alert('JSON 格式错误');
+                            }
+                          }}
+                          placeholder={'{\n  "authorization": "Bearer xxx"\n}'}
+                          className="w-full bg-black/40 border border-technical-border rounded-sm px-2.5 py-1.5 font-mono text-xs text-gray-300 focus:outline-none focus:border-technical-cyan/50 resize-none"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[9px] font-display text-technical-muted uppercase tracking-widest mb-1">响应字段路径 (refreshJsonPath - 选填)</label>
+                        <input
+                          type="text"
+                          value={source.refreshJsonPath ?? ''}
+                          onChange={(e) => setGlobalUrls(globalUrls.map(u => u.id === source.id ? { ...u, refreshJsonPath: e.target.value } : u))}
+                          onBlur={(e) => handleUpdateSource(source.id, { refreshJsonPath: e.target.value || undefined })}
+                          placeholder="subscribe_url 或 data.subscribe_url"
+                          className="w-full bg-black/40 border border-technical-border rounded-sm px-2.5 py-1.5 font-mono text-xs text-gray-300 focus:outline-none focus:border-technical-cyan/50"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Hysteria 2 parameters */}
+                    <div className="pt-2 border-t border-technical-border/20 space-y-2">
+                      <label className="block text-[10px] font-display font-bold text-amber-400 uppercase tracking-widest">Hysteria 2 客户端微调参数 (仅对该源中的 Hysteria 2 节点生效)</label>
+                      <div className="grid grid-cols-3 gap-3">
+                        <div>
+                          <label className="block text-[9px] font-display text-technical-muted uppercase tracking-widest mb-1">上传速度限制 (up)</label>
+                          <input
+                            type="text"
+                            value={source.hysteria2Up ?? ''}
+                            onChange={(e) => setGlobalUrls(globalUrls.map(u => u.id === source.id ? { ...u, hysteria2Up: e.target.value } : u))}
+                            onBlur={(e) => handleUpdateSource(source.id, { hysteria2Up: e.target.value || undefined })}
+                            placeholder="如: 30 Mbps"
+                            className="w-full bg-black/40 border border-technical-border rounded-sm px-2.5 py-1.5 font-mono text-xs text-gray-300 focus:outline-none focus:border-technical-cyan/50"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[9px] font-display text-technical-muted uppercase tracking-widest mb-1">下载速度限制 (down)</label>
+                          <input
+                            type="text"
+                            value={source.hysteria2Down ?? ''}
+                            onChange={(e) => setGlobalUrls(globalUrls.map(u => u.id === source.id ? { ...u, hysteria2Down: e.target.value } : u))}
+                            onBlur={(e) => handleUpdateSource(source.id, { hysteria2Down: e.target.value || undefined })}
+                            placeholder="如: 150 Mbps"
+                            className="w-full bg-black/40 border border-technical-border rounded-sm px-2.5 py-1.5 font-mono text-xs text-gray-300 focus:outline-none focus:border-technical-cyan/50"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[9px] font-display text-technical-muted uppercase tracking-widest mb-1">MTU 限制 (mtu)</label>
+                          <input
+                            type="number"
+                            value={source.hysteria2Mtu ?? ''}
+                            onChange={(e) => {
+                              const val = e.target.value ? parseInt(e.target.value, 10) : undefined;
+                              setGlobalUrls(globalUrls.map(u => u.id === source.id ? { ...u, hysteria2Mtu: val } : u));
+                            }}
+                            onBlur={(e) => {
+                              const val = e.target.value ? parseInt(e.target.value, 10) : undefined;
+                              handleUpdateSource(source.id, { hysteria2Mtu: val });
+                            }}
+                            placeholder="如: 1350"
+                            className="w-full bg-black/40 border border-technical-border rounded-sm px-2.5 py-1.5 font-mono text-xs text-gray-300 focus:outline-none focus:border-technical-cyan/50"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-3 pt-1">
+                      <button
+                        onClick={() => handleSourceRefresh(source.id)}
+                        disabled={!source.refreshUrl || refreshingKey === refKey}
+                        className="technical-button-primary py-1 px-3 text-xs gap-1.5 disabled:opacity-40"
+                      >
+                        <RefreshCw size={12} className={refreshingKey === refKey ? 'animate-spin' : ''} />
+                        <span>{refreshingKey === refKey ? '刷新中...' : '立即刷新'}</span>
+                      </button>
+                      {urlMsg?.key === refKey && (
+                        <span className={`text-xs font-mono flex items-center gap-1 ${urlMsg.ok ? 'text-green-400' : 'text-red-400'}`}>
+                          {urlMsg.ok ? <CheckCircle2 size={12} /> : <AlertTriangle size={12} />}
+                          <span className="truncate max-w-xs">{urlMsg.text}</span>
+                        </span>
+                      )}
+                      {source.lastRefreshedAt && (
+                        <span className="text-[9px] font-mono text-zinc-500 flex items-center gap-1 ml-auto">
+                          <Clock size={9} />最近更新: {new Date(source.lastRefreshedAt).toLocaleString('zh-CN')}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
-            </div>
-          </section>
-        ))}
-        {groups.length === 0 && (
-          <div className="text-center p-10 text-technical-muted border border-dashed border-technical-border rounded">暂无订阅组，请添加</div>
-        )}
-      </div>
+            );
+          })}
+          {globalUrls.length === 0 && (
+            <div className="text-center p-10 text-technical-muted border border-dashed border-technical-border rounded">暂无订阅源，请添加</div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

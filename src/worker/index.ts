@@ -155,6 +155,7 @@ interface StoredPasskey {
 
 /** 单条订阅 URL 条目 */
 export interface UrlEntry {
+  id: string;
   url: string;
   /** provider 名称，用于模板 {{PROVIDERS}} 注入，默认 p1/p2/... */
   name?: string;
@@ -179,6 +180,7 @@ export interface UrlEntry {
 
 export interface SubscriptionGroup {
   id: string; title: string; enabled: boolean; filter: string;
+  urlIds: string[];
   urls: UrlEntry[];
   updatedAt: string;
 }
@@ -264,9 +266,13 @@ function normalizeUrls(raw: any[]): UrlEntry[] {
     if (typeof item === 'string') {
       const nameMatch = item.match(/\|\s*name:\s*(\S+)/);
       const url = item.replace(/\s*\|.*$/, '').trim();
-      return nameMatch ? { url, name: nameMatch[1] } : { url };
+      return nameMatch ? { id: uuid(), url, name: nameMatch[1] } : { id: uuid(), url };
     }
-    return item as UrlEntry;
+    const entry = { ...item } as any;
+    if (!entry.id) {
+      entry.id = uuid();
+    }
+    return entry as UrlEntry;
   });
 }
 
@@ -401,23 +407,23 @@ async function fetchAndExtractUrl(entry: UrlEntry): Promise<{ ok: boolean; url?:
 /** 批量刷新一个订阅组内所有配置了 refreshUrl 的 URL 条目 */
 async function refreshGroupUrls(groupId: string, kv: KVNamespace): Promise<{ refreshed: number; errors: string[] }> {
   console.log(`[Cron] 开始刷新订阅组 ID: ${groupId}`);
-  const raw = await kv.get('subscriptions');
-  const list: any[] = raw ? JSON.parse(raw) : [];
-  const gIdx = list.findIndex((g: any) => g.id === groupId);
-  if (gIdx === -1) {
+  const globalUrls = await getGlobalUrlsAndMigrate(kv);
+  const subRaw = await kv.get('subscriptions');
+  const list: any[] = subRaw ? JSON.parse(subRaw) : [];
+  const group = list.find((g: any) => g.id === groupId);
+  if (!group) {
     console.log(`[Cron] 订阅组不存在: ${groupId}`);
     return { refreshed: 0, errors: ['订阅组不存在'] };
   }
 
-  const groupName = list[gIdx].title || groupId;
-  const entries = normalizeUrls(list[gIdx].urls ?? []);
-  type FetchResult = { i: number; ok: boolean; url?: string; msg: string | null };
-  const jobs = entries.map((entry, i): Promise<FetchResult> => {
-    if (entry.refreshUrl) {
-      console.log(`[Cron] 正在刷新 [${groupName}] 条目 ${i}: ${entry.refreshUrl}`);
-      return fetchAndExtractUrl(entry).then(r => ({ i, ...r, msg: r.msg }));
-    }
-    return Promise.resolve({ i, ok: false, url: undefined, msg: null });
+  const groupName = group.title || groupId;
+  const urlIds = group.urlIds ?? [];
+  const targets = globalUrls.filter(u => urlIds.includes(u.id) && u.refreshUrl);
+
+  type FetchResult = { id: string; ok: boolean; url?: string; msg: string | null };
+  const jobs = targets.map((entry): Promise<FetchResult> => {
+    console.log(`[Cron] 正在刷新 [${groupName}] 订阅源: ${entry.refreshUrl}`);
+    return fetchAndExtractUrl(entry).then(r => ({ id: entry.id, ...r, msg: r.msg }));
   });
   const results = await Promise.allSettled(jobs);
 
@@ -425,22 +431,29 @@ async function refreshGroupUrls(groupId: string, kv: KVNamespace): Promise<{ ref
   const errors: string[] = [];
   for (const r of results) {
     if (r.status === 'fulfilled') {
-      const { i, ok, url, msg } = r.value;
+      const { id, ok, url, msg } = r.value;
       if (ok && url) {
-        console.log(`[Cron] 刷新成功 [${groupName}] 条目 ${i}: 获取到新 URL`);
-        entries[i] = { ...entries[i], url, lastRefreshedAt: new Date().toISOString() }; refreshed++;
-      }
-      else if (msg) {
-        console.error(`[Cron] 刷新失败 [${groupName}] 条目 ${i}: ${msg}`);
+        const idx = globalUrls.findIndex(u => u.id === id);
+        if (idx !== -1) {
+          globalUrls[idx] = { ...globalUrls[idx], url, lastRefreshedAt: new Date().toISOString() };
+          refreshed++;
+        }
+      } else if (msg) {
         errors.push(msg);
       }
     } else {
-      console.error(`[Cron] 请求异常 [${groupName}]: ${String(r.reason)}`);
       errors.push(String(r.reason));
     }
   }
-  list[gIdx] = { ...list[gIdx], urls: entries, updatedAt: new Date().toISOString() };
-  await kv.put('subscriptions', JSON.stringify(list));
+
+  await kv.put('subscription_urls', JSON.stringify(globalUrls));
+  
+  const gIdx = list.findIndex(g => g.id === groupId);
+  if (gIdx !== -1) {
+    list[gIdx] = { ...list[gIdx], updatedAt: new Date().toISOString() };
+    await kv.put('subscriptions', JSON.stringify(list));
+  }
+
   console.log(`[Cron] 完成刷新订阅组 [${groupName}], 成功: ${refreshed}, 失败: ${errors.length}`);
   return { refreshed, errors };
 }
@@ -449,22 +462,47 @@ export default {
   // ---------- Cron 定时任务（每天 UTC 00:00）----------
   async scheduled(event: ScheduledEvent, env: Env, _ctx: ExecutionContext): Promise<void> {
     console.log(`[Cron] 定时任务触发: ${event.cron}`);
-    const raw = await env.KV.get('subscriptions');
-    const list: any[] = raw ? JSON.parse(raw) : [];
-    // 筛选：组已启用且至少有一个 URL 条目配置了 refreshUrl
-    const targets = list.filter((s: any) =>
-      s.enabled && normalizeUrls(s.urls ?? []).some((e: UrlEntry) => e.refreshUrl)
-    );
-    console.log(`[Cron] 找到 ${targets.length} 个符合条件的订阅组准备刷新`);
+    const globalUrls = await getGlobalUrlsAndMigrate(env.KV);
+    const subRaw = await env.KV.get('subscriptions');
+    const list: any[] = subRaw ? JSON.parse(subRaw) : [];
+    
+    const enabledUrlIds = new Set<string>();
+    for (const g of list) {
+      if (g.enabled) {
+        for (const id of (g.urlIds ?? [])) {
+          enabledUrlIds.add(id);
+        }
+      }
+    }
 
-    const results = await Promise.allSettled(targets.map((g: any) => refreshGroupUrls(g.id, env.KV)));
+    const targets = globalUrls.filter(u => u.refreshUrl && enabledUrlIds.has(u.id));
+    console.log(`[Cron] 找到 ${targets.length} 个符合条件的订阅源准备刷新`);
+
+    type FetchResult = { id: string; ok: boolean; url?: string; msg: string | null };
+    const jobs = targets.map((entry): Promise<FetchResult> => {
+      return fetchAndExtractUrl(entry).then(r => ({ id: entry.id, ...r, msg: r.msg }));
+    });
+    const results = await Promise.allSettled(jobs);
+
     let successCount = 0;
     let failCount = 0;
     for (const r of results) {
-      if (r.status === 'fulfilled') successCount++;
-      else failCount++;
+      if (r.status === 'fulfilled') {
+        const { id, ok, url } = r.value;
+        if (ok && url) {
+          const idx = globalUrls.findIndex(u => u.id === id);
+          if (idx !== -1) {
+            globalUrls[idx] = { ...globalUrls[idx], url, lastRefreshedAt: new Date().toISOString() };
+            successCount++;
+            continue;
+          }
+        }
+      }
+      failCount++;
     }
-    console.log(`[Cron] 定时任务执行完毕: 成功组数 ${successCount}, 失败组数 ${failCount}`);
+
+    await env.KV.put('subscription_urls', JSON.stringify(globalUrls));
+    console.log(`[Cron] 定时任务执行完毕: 成功 ${successCount}, 失败 ${failCount}`);
   },
 
   async fetch(request: Request, env: Env): Promise<Response> {
@@ -679,6 +717,12 @@ async function handleAPI(request: Request, env: Env, pathname: string): Promise<
         }
         return handleSubscriptions(request, env.KV, method, id);
 
+      case 'urls':
+        if (method === 'POST' && id && action === 'refresh') {
+          return handleUrlRefresh(id, env.KV);
+        }
+        return handleUrls(request, env.KV, method, id);
+
       case 'templates':     return handleTemplates(request, env.ATTACHMENTS, method, id);
       case 'links':         return handleLinks(request, env.KV, method, id);
       case 'dashboard':     return handleDashboard(env);
@@ -689,46 +733,194 @@ async function handleAPI(request: Request, env: Env, pathname: string): Promise<
   }
 }
 
-// ---------- 订阅组 CRUD ----------
+// ---------- 订阅源 / 订阅组辅助函数 ----------
 
-async function handleSubscriptions(req: Request, kv: KVNamespace, method: string, id: string|null): Promise<Response> {
-  const raw = await kv.get('subscriptions');
-  // 读时自动将旧的 string[] 迁移为 UrlEntry[]
-  let list: SubscriptionGroup[] = (raw ? JSON.parse(raw) : []).map((g: any) => ({ ...g, urls: normalizeUrls(g.urls ?? []) }));
+/** 获取所有全局订阅源，并自动处理旧数据的迁移 */
+async function getGlobalUrlsAndMigrate(kv: KVNamespace): Promise<UrlEntry[]> {
+  const urlsRaw = await kv.get('subscription_urls');
+  if (urlsRaw) {
+    return JSON.parse(urlsRaw) as UrlEntry[];
+  }
+
+  const subRaw = await kv.get('subscriptions');
+  if (!subRaw) return [];
+
+  const groups: any[] = JSON.parse(subRaw);
+  const globalUrls: UrlEntry[] = [];
+  const urlMap = new Map<string, string>();
+
+  for (const g of groups) {
+    const urls = normalizeUrls(g.urls ?? []);
+    for (const entry of urls) {
+      const key = `${entry.url}__${entry.name ?? ''}`;
+      if (!urlMap.has(key)) {
+        urlMap.set(key, entry.id);
+        globalUrls.push(entry);
+      }
+    }
+  }
+
+  const migratedGroups = groups.map(g => {
+    const urls = normalizeUrls(g.urls ?? []);
+    const urlIds = urls.map(entry => {
+      const key = `${entry.url}__${entry.name ?? ''}`;
+      return urlMap.get(key) || entry.id;
+    });
+    const { urls: _, ...rest } = g;
+    return { ...rest, urlIds };
+  });
+
+  await kv.put('subscription_urls', JSON.stringify(globalUrls));
+  await kv.put('subscriptions', JSON.stringify(migratedGroups));
+
+  return globalUrls;
+}
+
+/** 将订阅组内的 urlIds 解析为完整的 UrlEntry 列表 */
+function resolveSubscriptionGroup(group: any, globalUrls: UrlEntry[]): SubscriptionGroup {
+  const urlIds = group.urlIds ?? [];
+  const urls = urlIds.map((id: string) => globalUrls.find(u => u.id === id)).filter(Boolean) as UrlEntry[];
+  return {
+    ...group,
+    urlIds,
+    urls,
+  };
+}
+
+// ---------- 订阅源 CRUD ----------
+
+async function handleUrls(req: Request, kv: KVNamespace, method: string, id: string|null): Promise<Response> {
+  const list = await getGlobalUrlsAndMigrate(kv);
 
   if (method === 'GET' && !id) return ok(list);
-  if (method === 'GET' && id)  return list.find(s=>s.id===id) ? ok(list.find(s=>s.id===id)) : err404();
+  if (method === 'GET' && id) {
+    const item = list.find(u => u.id === id);
+    return item ? ok(item) : err404();
+  }
 
   if (method === 'POST' && !id) {
-    const body = await req.json<Omit<SubscriptionGroup,'id'|'updatedAt'>>();
-    const item: SubscriptionGroup = { ...body, urls: normalizeUrls(body.urls as any ?? []), id: uuid(), updatedAt: new Date().toISOString() };
-    await kv.put('subscriptions', JSON.stringify([...list, item]));
+    const body = await req.json<Omit<UrlEntry, 'id' | 'lastRefreshedAt'>>();
+    const item: UrlEntry = {
+      ...body,
+      id: uuid(),
+      lastRefreshedAt: undefined,
+    };
+    await kv.put('subscription_urls', JSON.stringify([...list, item]));
     return ok(item, 201);
   }
+
   if (method === 'PUT' && id) {
-    const idx = list.findIndex(s=>s.id===id);
-    if (idx===-1) return err404();
-    const body = await req.json<Partial<SubscriptionGroup>>();
-    const urls = body.urls !== undefined ? normalizeUrls(body.urls as any) : list[idx].urls;
-    list[idx] = { ...list[idx], ...body, urls, id, updatedAt: new Date().toISOString() };
-    await kv.put('subscriptions', JSON.stringify(list));
+    const idx = list.findIndex(u => u.id === id);
+    if (idx === -1) return err404();
+    const body = await req.json<Partial<UrlEntry>>();
+    delete (body as any).id;
+    list[idx] = { ...list[idx], ...body };
+    await kv.put('subscription_urls', JSON.stringify(list));
     return ok(list[idx]);
   }
+
   if (method === 'DELETE' && id) {
-    await kv.put('subscriptions', JSON.stringify(list.filter(s=>s.id!==id)));
+    const updatedList = list.filter(u => u.id !== id);
+    await kv.put('subscription_urls', JSON.stringify(updatedList));
+
+    const subRaw = await kv.get('subscriptions');
+    if (subRaw) {
+      const groups: any[] = JSON.parse(subRaw);
+      const updatedGroups = groups.map(g => {
+        if (g.urlIds && g.urlIds.includes(id)) {
+          return { ...g, urlIds: g.urlIds.filter((uid: string) => uid !== id) };
+        }
+        return g;
+      });
+      await kv.put('subscriptions', JSON.stringify(updatedGroups));
+    }
+
     return ok({ ok: true });
   }
+
   return err('Method Not Allowed', 405);
 }
 
-// ---------- 手动刷新单个订阅 ----------
+// ---------- 单个订阅源刷新 ----------
+
+async function handleUrlRefresh(id: string, kv: KVNamespace): Promise<Response> {
+  const globalUrls = await getGlobalUrlsAndMigrate(kv);
+  const idx = globalUrls.findIndex(u => u.id === id);
+  if (idx === -1) return err404();
+  const entry = globalUrls[idx];
+  if (!entry.refreshUrl) return err('该订阅源未配置 refreshUrl', 400);
+  const result = await fetchAndExtractUrl(entry);
+  if (!result.ok || !result.url) return err(result.msg, 502);
+  globalUrls[idx] = { ...entry, url: result.url, lastRefreshedAt: new Date().toISOString() };
+  await kv.put('subscription_urls', JSON.stringify(globalUrls));
+  return ok({ ok: true, url: result.url });
+}
+
+// ---------- 订阅组 CRUD ----------
+
+async function handleSubscriptions(req: Request, kv: KVNamespace, method: string, id: string|null): Promise<Response> {
+  const globalUrls = await getGlobalUrlsAndMigrate(kv);
+  const subRaw = await kv.get('subscriptions');
+  const rawList: any[] = subRaw ? JSON.parse(subRaw) : [];
+  let list: SubscriptionGroup[] = rawList.map(g => resolveSubscriptionGroup(g, globalUrls));
+
+  if (method === 'GET' && !id) return ok(list);
+  if (method === 'GET' && id) {
+    const item = list.find(s => s.id === id);
+    return item ? ok(item) : err404();
+  }
+
+  if (method === 'POST' && !id) {
+    const body = await req.json<Omit<SubscriptionGroup,'id'|'updatedAt'>>();
+    const urlIds = body.urlIds ?? (body.urls ?? []).map(u => u.id);
+    const itemToSave = {
+      title: body.title,
+      enabled: body.enabled,
+      filter: body.filter,
+      urlIds,
+      id: uuid(),
+      updatedAt: new Date().toISOString()
+    };
+    await kv.put('subscriptions', JSON.stringify([...rawList, itemToSave]));
+    return ok(resolveSubscriptionGroup(itemToSave, globalUrls), 201);
+  }
+
+  if (method === 'PUT' && id) {
+    const idx = rawList.findIndex(s => s.id === id);
+    if (idx === -1) return err404();
+    const body = await req.json<Partial<SubscriptionGroup>>();
+    const urlIds = body.urlIds !== undefined ? body.urlIds : (body.urls !== undefined ? body.urls.map(u => u.id) : rawList[idx].urlIds);
+    
+    rawList[idx] = {
+      ...rawList[idx],
+      title: body.title !== undefined ? body.title : rawList[idx].title,
+      enabled: body.enabled !== undefined ? body.enabled : rawList[idx].enabled,
+      filter: body.filter !== undefined ? body.filter : rawList[idx].filter,
+      urlIds,
+      updatedAt: new Date().toISOString()
+    };
+    await kv.put('subscriptions', JSON.stringify(rawList));
+    return ok(resolveSubscriptionGroup(rawList[idx], globalUrls));
+  }
+
+  if (method === 'DELETE' && id) {
+    await kv.put('subscriptions', JSON.stringify(rawList.filter(s => s.id !== id)));
+    return ok({ ok: true });
+  }
+
+  return err('Method Not Allowed', 405);
+}
+
+// ---------- 手动刷新单个订阅组 ----------
 
 async function handleSubscriptionRefresh(id: string, kv: KVNamespace): Promise<Response> {
-  const raw = await kv.get('subscriptions');
-  const list: any[] = raw ? JSON.parse(raw) : [];
+  const globalUrls = await getGlobalUrlsAndMigrate(kv);
+  const subRaw = await kv.get('subscriptions');
+  const list: any[] = subRaw ? JSON.parse(subRaw) : [];
   const group = list.find((s: any) => s.id === id);
   if (!group) return err404();
-  const entries = normalizeUrls(group.urls ?? []);
+  const urlIds = group.urlIds ?? [];
+  const entries = globalUrls.filter(u => urlIds.includes(u.id));
   if (!entries.some(e => e.refreshUrl)) return err('该订阅组内无配置 refreshUrl 的条目', 400);
   const result = await refreshGroupUrls(id, kv);
   return ok(result);
@@ -737,11 +929,13 @@ async function handleSubscriptionRefresh(id: string, kv: KVNamespace): Promise<R
 // ---------- 获取订阅组内所有代理节点 ----------
 
 async function handleSubscriptionProxies(id: string, kv: KVNamespace): Promise<Response> {
-  const raw = await kv.get('subscriptions');
-  const list: any[] = raw ? JSON.parse(raw) : [];
-  const group = list.find((s: any) => s.id === id);
-  if (!group) return err404();
-  const entries = normalizeUrls(group.urls ?? []);
+  const globalUrls = await getGlobalUrlsAndMigrate(kv);
+  const subRaw = await kv.get('subscriptions');
+  const list: any[] = subRaw ? JSON.parse(subRaw) : [];
+  const rawGroup = list.find((s: any) => s.id === id);
+  if (!rawGroup) return err404();
+  const group = resolveSubscriptionGroup(rawGroup, globalUrls);
+  const entries = group.urls;
   
   const results = await Promise.allSettled(entries.map(entry =>
     fetch(entry.url.trim(), { method: 'GET', headers: { 'User-Agent': 'clash.meta' } }).then(r => r.text())
@@ -771,23 +965,17 @@ async function handleSubscriptionProxies(id: string, kv: KVNamespace): Promise<R
   return ok(Array.from(proxies));
 }
 
-// ---------- 单个 URL 条目刷新 ----------
+// ---------- 兼容：刷新订阅组内的单个 URL ----------
 
 async function handleUrlEntryRefresh(groupId: string, urlIndex: number, kv: KVNamespace): Promise<Response> {
-  const raw = await kv.get('subscriptions');
-  const list: any[] = raw ? JSON.parse(raw) : [];
-  const gIdx = list.findIndex((g: any) => g.id === groupId);
-  if (gIdx === -1) return err404();
-  const entries = normalizeUrls(list[gIdx].urls ?? []);
-  const entry = entries[urlIndex];
-  if (!entry) return err('URL 条目不存在', 404);
-  if (!entry.refreshUrl) return err('该条目未配置 refreshUrl', 400);
-  const result = await fetchAndExtractUrl(entry);
-  if (!result.ok || !result.url) return err(result.msg, 502);
-  entries[urlIndex] = { ...entry, url: result.url, lastRefreshedAt: new Date().toISOString() };
-  list[gIdx] = { ...list[gIdx], urls: entries, updatedAt: new Date().toISOString() };
-  await kv.put('subscriptions', JSON.stringify(list));
-  return ok({ ok: true, url: result.url });
+  const globalUrls = await getGlobalUrlsAndMigrate(kv);
+  const subRaw = await kv.get('subscriptions');
+  const list: any[] = subRaw ? JSON.parse(subRaw) : [];
+  const group = list.find((g: any) => g.id === groupId);
+  if (!group) return err404();
+  const urlId = group.urlIds?.[urlIndex];
+  if (!urlId) return err('URL 条目不存在', 404);
+  return handleUrlRefresh(urlId, kv);
 }
 
 // ---------- 模板 CRUD (R2 对象存储) ----------
@@ -1168,7 +1356,8 @@ async function handleSubFetch(pathname: string, env: Env, request: Request): Pro
   const rawGroup = groups.find(g=>g.id===link.subscriptionGroupId);
   if (!rawGroup || !rawGroup.enabled) return err('订阅组不存在或已禁用', 404);
 
-  const group: SubscriptionGroup = { ...rawGroup, urls: normalizeUrls(rawGroup.urls ?? []) };
+  const globalUrls = await getGlobalUrlsAndMigrate(env.KV);
+  const group: SubscriptionGroup = resolveSubscriptionGroup(rawGroup, globalUrls);
 
   const tplObj = await env.ATTACHMENTS.get(link.templateId);
   const tpl: Template|null = tplObj ? JSON.parse(await tplObj.text()) : null;
