@@ -723,6 +723,9 @@ async function handleAPI(request: Request, env: Env, pathname: string): Promise<
         if (method === 'POST' && id && action === 'refresh') {
           return handleUrlRefresh(id, env.KV);
         }
+        if (method === 'POST' && id && action === 'sync_cache') {
+          return handleUrlCacheSync(id, env);
+        }
         return handleUrls(request, env.KV, method, id);
 
       case 'templates':     return handleTemplates(request, env.ATTACHMENTS, method, id);
@@ -856,6 +859,29 @@ async function handleUrlRefresh(id: string, kv: KVNamespace): Promise<Response> 
   globalUrls[idx] = { ...entry, url: result.url, lastRefreshedAt: new Date().toISOString() };
   await kv.put('subscription_urls', JSON.stringify(globalUrls));
   return ok({ ok: true, url: result.url });
+}
+
+async function handleUrlCacheSync(id: string, env: Env): Promise<Response> {
+  const globalUrls = await getGlobalUrlsAndMigrate(env.KV);
+  const entry = globalUrls.find(u => u.id === id);
+  if (!entry) return err404();
+  
+  try {
+    // 强制并发拉取最新数据（节点和流量信息）并写入 KV
+    await Promise.all([
+      updateSubscriptionCache(env, entry, 'clash.meta'),
+      updateSubscriptionCache(env, entry, 'Clash/1.8.0')
+    ]);
+    
+    // 更新此条目的最近一次自动/手动刷新时间
+    const idx = globalUrls.findIndex(u => u.id === id);
+    globalUrls[idx] = { ...entry, lastRefreshedAt: new Date().toISOString() };
+    await env.KV.put('subscription_urls', JSON.stringify(globalUrls));
+    
+    return ok({ ok: true, msg: '同步缓存成功' });
+  } catch (e) {
+    return err(`同步上游订阅失败: ${String(e)}`, 502);
+  }
 }
 
 // ---------- 订阅组 CRUD ----------

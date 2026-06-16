@@ -565,6 +565,20 @@ function SubscriptionsView() {
     }
   };
 
+  const handleSourceSyncCache = async (id: string) => {
+    setRefreshingKey(`${id}-sync`);
+    setUrlMsg(null);
+    try {
+      const r = await api.syncUrlCache(id);
+      setUrlMsg({ key: id, ok: true, text: r.msg || '同步成功' });
+      loadData();
+    } catch (e: any) {
+      setUrlMsg({ key: id, ok: false, text: e.message || '同步失败' });
+    } finally {
+      setRefreshingKey(null);
+    }
+  };
+
   if (loading) return <div className="p-10 text-technical-muted font-mono">Loading...</div>;
 
   return (
@@ -1234,6 +1248,15 @@ function SubscriptionsView() {
                       >
                         <RefreshCw size={12} className={refreshingKey === refKey ? 'animate-spin' : ''} />
                         <span>{refreshingKey === refKey ? '刷新中...' : '立即刷新'}</span>
+                      </button>
+                      <button
+                        onClick={() => handleSourceSyncCache(source.id)}
+                        disabled={refreshingKey === `${refKey}-sync`}
+                        className="technical-button-outline py-1 px-3 text-xs gap-1.5 disabled:opacity-40"
+                        title="立即从订阅源 URL 同步节点与流量数据，并更新本地 KV 缓存"
+                      >
+                        <RefreshCw size={12} className={refreshingKey === `${refKey}-sync` ? 'animate-spin' : ''} />
+                        <span>{refreshingKey === `${refKey}-sync` ? '同步中...' : '手动拉取上游'}</span>
                       </button>
                       {urlMsg?.key === refKey && (
                         <span className={`text-xs font-mono flex items-center gap-1 ${urlMsg.ok ? 'text-green-400' : 'text-red-400'}`}>

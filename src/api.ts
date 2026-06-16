@@ -163,6 +163,8 @@ export const deleteUrl = (id: string) =>
   apiFetch(`/api/urls/${id}`, { method:'DELETE' });
 export const refreshUrl = (id: string) =>
   apiFetch<{ ok: boolean; url: string }>(`/api/urls/${id}/refresh`, { method:'POST' });
+export const syncUrlCache = (id: string) =>
+  apiFetch<{ ok: boolean; msg: string }>(`/api/urls/${id}/sync_cache`, { method:'POST' });
 
 // ---------- Templates ----------
 
