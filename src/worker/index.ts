@@ -1177,11 +1177,24 @@ async function updateSubscriptionCache(
   // 2. 如果配置了 Akile API，优先用 Akile API 的流量数据覆盖/作为 userInfo
   if (entry.akileServerId && entry.akileApiClient && entry.akileApiSecret) {
     try {
-      const akileRes = await fetch(`https://api.akile.ai/api/v1/api/server/GetServerStatus?id=${entry.akileServerId.trim()}`, {
+      const cleanVal = (val?: string) => {
+        if (!val) return '';
+        let s = val.trim();
+        if ((s.startsWith('"') && s.endsWith('"')) || (s.startsWith("'") && s.endsWith("'"))) {
+          s = s.slice(1, -1).trim();
+        }
+        return s;
+      };
+
+      const serverId = cleanVal(entry.akileServerId);
+      const apiClient = cleanVal(entry.akileApiClient);
+      const apiSecret = cleanVal(entry.akileApiSecret);
+
+      const akileRes = await fetch(`https://api.akile.ai/api/v1/api/server/GetServerStatus?id=${serverId}`, {
         headers: {
           'accept': 'application/json',
-          'Api-Client': entry.akileApiClient.trim(),
-          'Api-Secret': entry.akileApiSecret.trim()
+          'api-client': apiClient,
+          'api-secret': apiSecret
         }
       });
       if (akileRes.ok) {
