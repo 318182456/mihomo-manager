@@ -1172,10 +1172,10 @@ function SubscriptionsView() {
                       <label className="block text-[10px] font-display font-bold text-technical-cyan uppercase tracking-widest">缓存刷新配置</label>
                       <div className="grid grid-cols-3 gap-3">
                         <div>
-                          <label className="block text-[9px] font-display text-technical-muted uppercase tracking-widest mb-1">缓存过期时间 (分钟，默认5，0表示不过期)</label>
+                          <label className="block text-[9px] font-display text-technical-muted uppercase tracking-widest mb-1">缓存过期时间 (分钟，默认5，0不过期，-1不缓存)</label>
                           <input
                             type="number"
-                            min={0}
+                            min={-1}
                             value={source.cacheTtl !== undefined ? Math.round(source.cacheTtl / 60) : ''}
                             onChange={(e) => {
                               const minutes = e.target.value !== '' ? parseInt(e.target.value, 10) : undefined;
@@ -1187,7 +1187,7 @@ function SubscriptionsView() {
                               const seconds = (minutes !== undefined && !isNaN(minutes)) ? minutes * 60 : undefined;
                               handleUpdateSource(source.id, { cacheTtl: seconds });
                             }}
-                            placeholder="如: 5 (0表示不过期)"
+                            placeholder="如: 5 (0不过期, -1不缓存)"
                             className="w-full bg-black/40 border border-technical-border rounded-sm px-2.5 py-1.5 font-mono text-xs text-gray-300 focus:outline-none focus:border-technical-cyan/50"
                           />
                         </div>

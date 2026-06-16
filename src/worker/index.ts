@@ -1090,6 +1090,11 @@ async function fetchSubscriptionWithCache(
   const cacheKey = `sub_cache:${entry.id}`;
   const cacheTtl = entry.cacheTtl !== undefined ? entry.cacheTtl : 300; // 默认 300 秒 (5分钟)
 
+  if (cacheTtl < 0) {
+    console.log(`[Cache Bypass] 订阅源 ${entry.name || entry.id} 配置为不缓存，开始同步拉取`);
+    return await updateSubscriptionCache(env, entry, userAgent);
+  }
+
   // 1. 尝试从 KV 读取缓存
   let cached: SubscriptionCache | null = null;
   try {
