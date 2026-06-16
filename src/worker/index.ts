@@ -176,6 +176,8 @@ export interface UrlEntry {
   hysteria2Up?: string;
   hysteria2Down?: string;
   hysteria2Mtu?: number;
+  /** 缓存时间阈值，单位：秒 */
+  cacheTtl?: number;
 }
 
 export interface SubscriptionGroup {
@@ -505,14 +507,14 @@ export default {
     console.log(`[Cron] 定时任务执行完毕: 成功 ${successCount}, 失败 ${failCount}`);
   },
 
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const { pathname } = new URL(request.url);
 
     if (request.method === 'OPTIONS')
       return new Response(null, { status: 204, headers: CORS });
 
     if (pathname.startsWith('/sub/'))
-      return handleSubFetch(pathname, env, request);
+      return handleSubFetch(pathname, env, request, ctx);
 
     if (pathname.startsWith('/api/')) {
       // 公开路由
@@ -1047,21 +1049,122 @@ async function handleDashboard(env: Env): Promise<Response> {
   });
 }
 
+interface SubscriptionCache {
+  lastCacheUpdate: number;
+  data: string;
+  userInfo?: string;
+}
+
+/**
+ * 带有 KV 缓存与 SWR (Stale-While-Revalidate) 异步后台刷新功能的订阅抓取
+ */
+async function fetchSubscriptionWithCache(
+  env: Env,
+  entry: UrlEntry,
+  ctx?: ExecutionContext,
+  userAgent: string = 'clash.meta'
+): Promise<SubscriptionCache> {
+  const cacheKey = `sub_cache:${entry.id}`;
+  const cacheTtl = entry.cacheTtl !== undefined ? entry.cacheTtl : 300; // 默认 300 秒 (5分钟)
+
+  // 1. 尝试从 KV 读取缓存
+  let cached: SubscriptionCache | null = null;
+  try {
+    const raw = await env.KV.get(cacheKey);
+    if (raw) {
+      cached = JSON.parse(raw) as SubscriptionCache;
+    }
+  } catch (e) {
+    console.error(`[Cache] 读取 KV 失败: ${entry.id}`, e);
+  }
+
+  const now = Math.floor(Date.now() / 1000);
+
+  if (cached) {
+    // 2. 检查缓存是否过期
+    const isExpired = now - cached.lastCacheUpdate > cacheTtl;
+    if (isExpired && ctx) {
+      console.log(`[Cache SWR] 订阅源 ${entry.name || entry.id} 缓存已过期，触发后台异步刷新`);
+      // 触发后台异步刷新，不阻塞客户端响应
+      ctx.waitUntil(
+        updateSubscriptionCache(env, entry, userAgent)
+          .catch(err => console.error(`[Cache SWR] 后台刷新失败: ${entry.id}`, err))
+      );
+    }
+    return cached;
+  }
+
+  // 3. 缓存不存在（冷启动），必须同步获取
+  console.log(`[Cache Cold] 订阅源 ${entry.name || entry.id} 缓存缺失，开始同步获取`);
+  return await updateSubscriptionCache(env, entry, userAgent);
+}
+
+/**
+ * 实际向上游请求并写入 KV 缓存的逻辑
+ */
+async function updateSubscriptionCache(
+  env: Env,
+  entry: UrlEntry,
+  userAgent: string
+): Promise<SubscriptionCache> {
+  const cacheKey = `sub_cache:${entry.id}`;
+  const urlToFetch = entry.url.trim();
+  if (!urlToFetch) {
+    throw new Error('订阅源 URL 为空');
+  }
+
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), 15000); // 15秒超时保护
+
+  try {
+    const response = await fetch(urlToFetch, {
+      signal: controller.signal,
+      headers: {
+        'User-Agent': userAgent,
+        ...(entry.refreshHeaders ?? {})
+      }
+    });
+
+    clearTimeout(id);
+
+    if (!response.ok) {
+      throw new Error(`HTTP 错误 ${response.status}`);
+    }
+
+    const data = await response.text();
+    const userInfo = response.headers.get('subscription-userinfo') || response.headers.get('Subscription-Userinfo') || '';
+
+    const newCache: SubscriptionCache = {
+      lastCacheUpdate: Math.floor(Date.now() / 1000),
+      data,
+      userInfo
+    };
+
+    // 写入 KV
+    await env.KV.put(cacheKey, JSON.stringify(newCache));
+    console.log(`[Cache] 订阅源 ${entry.name || entry.id} 缓存更新成功`);
+    return newCache;
+  } catch (err) {
+    clearTimeout(id);
+    throw err;
+  }
+}
+
 // ---------- 订阅内容下发 ----------
 
-async function fetchSubscriptionUserInfo(entries: UrlEntry[]): Promise<string> {
+async function fetchSubscriptionUserInfo(entries: UrlEntry[], env: Env, ctx?: ExecutionContext): Promise<string> {
   if (entries.length === 0) return 'upload=0; download=0; total=107374182400; expire=0';
 
   let upload = 0, download = 0, total = 0, expire = 0;
   let foundInfo = false;
 
   const results = await Promise.allSettled(entries.map(entry =>
-    fetch(entry.url.trim(), { method: 'GET', headers: { 'User-Agent': 'Clash/1.8.0' } })
+    fetchSubscriptionWithCache(env, entry, ctx, 'Clash/1.8.0')
   ));
 
   for (const res of results) {
-    if (res.status === 'fulfilled' && res.value.ok) {
-      const info = res.value.headers.get('subscription-userinfo') || res.value.headers.get('Subscription-Userinfo');
+    if (res.status === 'fulfilled' && res.value) {
+      const info = res.value.userInfo;
       if (info) {
         foundInfo = true;
         const matchUp    = info.match(/upload\s*=\s*(\d+)/i);
@@ -1287,19 +1390,17 @@ function proxyToURI(p: any): string {
   return '';
 }
 
-/**
- * 拉取订阅 URL 并返回过滤后的 proxies 数组 + 原始内容列表
- * 若存在 filter 则按正则过滤代理名称
- */
 async function fetchProxiesFromGroup(
-  group: SubscriptionGroup
+  group: SubscriptionGroup,
+  env: Env,
+  ctx?: ExecutionContext
 ): Promise<{ proxies: any[]; rawYamls: string[] }> {
   const filter = compileGroupFilter(group.filter);
   const filterRe = filter ? new RegExp(filter) : null;
 
   const results = await Promise.allSettled(
     group.urls.map(entry =>
-      fetch(entry.url.trim(), { headers: { 'User-Agent': 'clash.meta' } }).then(r => r.text())
+      fetchSubscriptionWithCache(env, entry, ctx, 'clash.meta').then(c => c.data)
     )
   );
 
@@ -1341,7 +1442,7 @@ async function fetchProxiesFromGroup(
   return { proxies, rawYamls };
 }
 
-async function handleSubFetch(pathname: string, env: Env, request: Request): Promise<Response> {
+async function handleSubFetch(pathname: string, env: Env, request: Request, ctx: ExecutionContext): Promise<Response> {
   const token = pathname.replace(/^\/sub\//, '').split('/')[0];
   if (!token) return err404();
 
@@ -1383,8 +1484,8 @@ async function handleSubFetch(pathname: string, env: Env, request: Request): Pro
     }
 
     const resolvedGroup = { ...group, urls: targetUrls };
-    const { proxies } = await fetchProxiesFromGroup(resolvedGroup);
-    const userInfo = await fetchSubscriptionUserInfo(targetUrls);
+    const { proxies } = await fetchProxiesFromGroup(resolvedGroup, env, ctx);
+    const userInfo = await fetchSubscriptionUserInfo(targetUrls, env, ctx);
 
     if (wantNodes) {
       const nodeText = proxies.map(p => proxyToURI(p)).filter(Boolean).join('\n');
@@ -1398,10 +1499,10 @@ async function handleSubFetch(pathname: string, env: Env, request: Request): Pro
   const tplObj = await env.ATTACHMENTS.get(link.templateId);
   const tpl: Template|null = tplObj ? JSON.parse(await tplObj.text()) : null;
 
-  const userInfo = await fetchSubscriptionUserInfo(group.urls);
+  const userInfo = await fetchSubscriptionUserInfo(group.urls, env, ctx);
 
   // 拉取并过滤代理节点
-  const { proxies, rawYamls } = await fetchProxiesFromGroup(group);
+  const { proxies, rawYamls } = await fetchProxiesFromGroup(group, env, ctx);
 
   if (!tpl) {
     if (proxies.length > 0) {

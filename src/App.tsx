@@ -1153,6 +1153,33 @@ function SubscriptionsView() {
                       </div>
                     </div>
 
+                    {/* Cache parameters */}
+                    <div className="pt-2 border-t border-technical-border/20 space-y-2">
+                      <label className="block text-[10px] font-display font-bold text-technical-cyan uppercase tracking-widest">缓存刷新配置</label>
+                      <div className="grid grid-cols-3 gap-3">
+                        <div>
+                          <label className="block text-[9px] font-display text-technical-muted uppercase tracking-widest mb-1">缓存过期时间 (分钟，默认5)</label>
+                          <input
+                            type="number"
+                            min={1}
+                            value={source.cacheTtl ? Math.round(source.cacheTtl / 60) : ''}
+                            onChange={(e) => {
+                              const minutes = e.target.value ? parseInt(e.target.value, 10) : undefined;
+                              const seconds = minutes ? minutes * 60 : undefined;
+                              setGlobalUrls(globalUrls.map(u => u.id === source.id ? { ...u, cacheTtl: seconds } : u));
+                            }}
+                            onBlur={(e) => {
+                              const minutes = e.target.value ? parseInt(e.target.value, 10) : undefined;
+                              const seconds = minutes ? minutes * 60 : undefined;
+                              handleUpdateSource(source.id, { cacheTtl: seconds });
+                            }}
+                            placeholder="如: 5"
+                            className="w-full bg-black/40 border border-technical-border rounded-sm px-2.5 py-1.5 font-mono text-xs text-gray-300 focus:outline-none focus:border-technical-cyan/50"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
                     {/* Hysteria 2 parameters */}
                     <div className="pt-2 border-t border-technical-border/20 space-y-2">
                       <label className="block text-[10px] font-display font-bold text-amber-400 uppercase tracking-widest">Hysteria 2 客户端微调参数 (仅对该源中的 Hysteria 2 节点生效)</label>

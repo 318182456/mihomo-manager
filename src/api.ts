@@ -21,6 +21,7 @@ export interface UrlEntry {
   hysteria2Up?: string;
   hysteria2Down?: string;
   hysteria2Mtu?: number;
+  cacheTtl?: number;
 }
 
 export interface SubscriptionGroup {
