@@ -867,11 +867,8 @@ async function handleUrlCacheSync(id: string, env: Env): Promise<Response> {
   if (!entry) return err404();
   
   try {
-    // 强制并发拉取最新数据（节点和流量信息）并写入 KV
-    await Promise.all([
-      updateSubscriptionCache(env, entry, 'clash.meta'),
-      updateSubscriptionCache(env, entry, 'Clash/1.8.0')
-    ]);
+    // 强制拉取最新数据（节点和流量信息）并写入 KV
+    await updateSubscriptionCache(env, entry, 'clash.meta');
     
     // 更新此条目的最近一次自动/手动刷新时间
     const idx = globalUrls.findIndex(u => u.id === id);
@@ -1131,7 +1128,7 @@ async function fetchSubscriptionWithCache(
 async function updateSubscriptionCache(
   env: Env,
   entry: UrlEntry,
-  userAgent: string
+  userAgent: string = 'clash.meta'
 ): Promise<SubscriptionCache> {
   const cacheKey = `sub_cache:${entry.id}`;
   const urlToFetch = entry.url.trim();
@@ -1139,8 +1136,12 @@ async function updateSubscriptionCache(
     throw new Error('订阅源 URL 为空');
   }
 
+  // 1. 发起主请求 (默认 clash.meta UA)
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), 15000); // 15秒超时保护
+
+  let data = '';
+  let userInfo = '';
 
   try {
     const response = await fetch(urlToFetch, {
@@ -1157,23 +1158,47 @@ async function updateSubscriptionCache(
       throw new Error(`HTTP 错误 ${response.status}`);
     }
 
-    const data = await response.text();
-    const userInfo = response.headers.get('subscription-userinfo') || response.headers.get('Subscription-Userinfo') || '';
+    data = await response.text();
+    userInfo = response.headers.get('subscription-userinfo') || response.headers.get('Subscription-Userinfo') || '';
 
-    const newCache: SubscriptionCache = {
-      lastCacheUpdate: Math.floor(Date.now() / 1000),
-      data,
-      userInfo
-    };
-
-    // 写入 KV
-    await env.KV.put(cacheKey, JSON.stringify(newCache));
-    console.log(`[Cache] 订阅源 ${entry.name || entry.id} 缓存更新成功`);
-    return newCache;
   } catch (err) {
     clearTimeout(id);
-    throw err;
+    throw new Error(`主连接拉取失败: ${String(err)}`);
   }
+
+  // 2. 如果主请求没有返回流量头，尝试用 Clash UA 悄悄拉取一次流量信息 (非强制，失败则吞掉)
+  if (!userInfo) {
+    const infoController = new AbortController();
+    const infoTimeout = setTimeout(() => infoController.abort(), 8000); // 8秒超时即可
+
+    try {
+      const infoResponse = await fetch(urlToFetch, {
+        signal: infoController.signal,
+        headers: {
+          'User-Agent': 'Clash/1.8.0',
+          ...(entry.refreshHeaders ?? {})
+        }
+      });
+      clearTimeout(infoTimeout);
+      if (infoResponse.ok) {
+        userInfo = infoResponse.headers.get('subscription-userinfo') || infoResponse.headers.get('Subscription-Userinfo') || '';
+      }
+    } catch (e) {
+      clearTimeout(infoTimeout);
+      console.warn(`[Cache Info Update] 辅助获取流量信息失败 (已忽略): ${e}`);
+    }
+  }
+
+  const newCache: SubscriptionCache = {
+    lastCacheUpdate: Math.floor(Date.now() / 1000),
+    data,
+    userInfo
+  };
+
+  // 3. 一次性写入 KV
+  await env.KV.put(cacheKey, JSON.stringify(newCache));
+  console.log(`[Cache] 订阅源 ${entry.name || entry.id} 缓存更新成功`);
+  return newCache;
 }
 
 // ---------- 订阅内容下发 ----------
