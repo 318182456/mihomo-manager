@@ -1190,21 +1190,36 @@ async function updateSubscriptionCache(
       const apiClient = cleanVal(entry.akileApiClient);
       const apiSecret = cleanVal(entry.akileApiSecret);
 
-      const akileRes = await fetch(`https://api.akile.ai/api/v1/api/server/GetServerStatus?id=${serverId}`, {
+      const akileRes = await fetch('https://api.akile.ai/api/v1/api/server/GetServerList', {
+        method: 'POST',
         headers: {
           'accept': 'application/json',
-          'api-client': apiClient,
-          'api-secret': apiSecret
-        }
+          'Api-Client': apiClient,
+          'Api-Secret': apiSecret,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          page_num: 1,
+          page_size: 100
+        })
       });
       if (akileRes.ok) {
         const akileJson = await akileRes.json() as any;
-        if (akileJson.status_code === 0 && akileJson.data) {
-          const used = akileJson.data.usages?.bandwidth ?? 0;
-          const total = akileJson.data.limits?.bandwidth ?? 0;
-          const expire = akileJson.data.next_reset_time ?? 0;
-          userInfo = `upload=0; download=${used}; total=${total}; expire=${expire}`;
-          console.log(`[Akile API] 成功获取流量信息: ${userInfo}`);
+        if (akileJson.status_code === 0 && Array.isArray(akileJson.list)) {
+          const item = akileJson.list.find((s: any) => 
+            s.id?.toString() === serverId || 
+            s.server_id === serverId || 
+            s.server_name === serverId
+          );
+          if (item) {
+            const used = item.used_flow ?? 0;
+            const total = (item.flow ?? 0) * 1024 * 1024 * 1024;
+            const expire = item.due_time ?? 0;
+            userInfo = `upload=0; download=${used}; total=${total}; expire=${expire}`;
+            console.log(`[Akile API] 成功获取流量信息: ${userInfo}`);
+          } else {
+            console.error(`[Akile API] 未在列表中找到 serverId: ${serverId}`);
+          }
         } else {
           console.error(`[Akile API] 接口返回错误: ${akileJson.status_msg}`);
         }
