@@ -1155,15 +1155,15 @@ async function updateSubscriptionCache(
     clearTimeout(id);
 
     if (!response.ok) {
-      throw new Error(`HTTP 错误 ${response.status}`);
+      throw new Error(`上游响应错误 HTTP ${response.status} ${response.statusText}`);
     }
 
     data = await response.text();
     userInfo = response.headers.get('subscription-userinfo') || response.headers.get('Subscription-Userinfo') || '';
 
-  } catch (err) {
+  } catch (err: any) {
     clearTimeout(id);
-    throw new Error(`主连接拉取失败: ${String(err)}`);
+    throw new Error(`网络拉取失败: ${err.message || String(err)}`);
   }
 
   // 2. 如果主请求没有返回流量头，尝试用 Clash UA 悄悄拉取一次流量信息 (非强制，失败则吞掉)
