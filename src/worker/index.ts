@@ -1104,8 +1104,8 @@ async function fetchSubscriptionWithCache(
   const now = Math.floor(Date.now() / 1000);
 
   if (cached) {
-    // 2. 检查缓存是否过期
-    const isExpired = now - cached.lastCacheUpdate > cacheTtl;
+    // 2. 检查缓存是否过期 (cacheTtl <= 0 表示永不过期)
+    const isExpired = cacheTtl > 0 && (now - cached.lastCacheUpdate > cacheTtl);
     if (isExpired && ctx) {
       console.log(`[Cache SWR] 订阅源 ${entry.name || entry.id} 缓存已过期，触发后台异步刷新`);
       // 触发后台异步刷新，不阻塞客户端响应
