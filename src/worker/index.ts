@@ -178,6 +178,9 @@ export interface UrlEntry {
   hysteria2Mtu?: number;
   /** 缓存时间阈值，单位：秒 */
   cacheTtl?: number;
+  akileServerId?: string;
+  akileApiClient?: string;
+  akileApiSecret?: string;
 }
 
 export interface SubscriptionGroup {
@@ -1171,8 +1174,37 @@ async function updateSubscriptionCache(
     throw new Error(`网络拉取失败: ${err.message || String(err)}`);
   }
 
-  // 2. 如果主请求没有返回流量头，尝试用 Clash UA 悄悄拉取一次流量信息 (非强制，失败则吞掉)
-  if (!userInfo) {
+  // 2. 如果配置了 Akile API，优先用 Akile API 的流量数据覆盖/作为 userInfo
+  if (entry.akileServerId && entry.akileApiClient && entry.akileApiSecret) {
+    try {
+      const akileRes = await fetch(`https://api.akile.ai/api/v1/api/server/GetServerStatus?id=${entry.akileServerId.trim()}`, {
+        headers: {
+          'accept': 'application/json',
+          'Api-Client': entry.akileApiClient.trim(),
+          'Api-Secret': entry.akileApiSecret.trim()
+        }
+      });
+      if (akileRes.ok) {
+        const akileJson = await akileRes.json() as any;
+        if (akileJson.status_code === 0 && akileJson.data) {
+          const used = akileJson.data.usages?.bandwidth ?? 0;
+          const total = akileJson.data.limits?.bandwidth ?? 0;
+          const expire = akileJson.data.next_reset_time ?? 0;
+          userInfo = `upload=0; download=${used}; total=${total}; expire=${expire}`;
+          console.log(`[Akile API] 成功获取流量信息: ${userInfo}`);
+        } else {
+          console.error(`[Akile API] 接口返回错误: ${akileJson.status_msg}`);
+        }
+      } else {
+        console.error(`[Akile API] HTTP 错误: ${akileRes.status}`);
+      }
+    } catch (e) {
+      console.error(`[Akile API] 请求异常:`, e);
+    }
+  }
+
+  // 3. 如果没有 userInfo 且未配置 Akile API，尝试用 Clash UA 悄悄拉取一次流量信息 (非强制，失败则吞掉)
+  if (!userInfo && !(entry.akileServerId && entry.akileApiClient && entry.akileApiSecret)) {
     const infoController = new AbortController();
     const infoTimeout = setTimeout(() => infoController.abort(), 8000); // 8秒超时即可
 

@@ -1240,6 +1240,46 @@ function SubscriptionsView() {
                       </div>
                     </div>
 
+                    {/* Akile API parameters */}
+                    <div className="pt-2 border-t border-technical-border/20 space-y-2">
+                      <label className="block text-[10px] font-display font-bold text-technical-cyan uppercase tracking-widest">Akile 流量监控配置 (用于修正与服务商不一致的流量数据)</label>
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                        <div>
+                          <label className="block text-[9px] font-display text-technical-muted uppercase tracking-widest mb-1">Server ID (id)</label>
+                          <input
+                            type="text"
+                            value={source.akileServerId ?? ''}
+                            onChange={(e) => setGlobalUrls(globalUrls.map(u => u.id === source.id ? { ...u, akileServerId: e.target.value } : u))}
+                            onBlur={(e) => handleUpdateSource(source.id, { akileServerId: e.target.value.trim() || undefined })}
+                            placeholder="如: 105569"
+                            className="w-full bg-black/40 border border-technical-border rounded-sm px-2.5 py-1.5 font-mono text-xs text-gray-300 focus:outline-none focus:border-technical-cyan/50"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[9px] font-display text-technical-muted uppercase tracking-widest mb-1">Api Client</label>
+                          <input
+                            type="text"
+                            value={source.akileApiClient ?? ''}
+                            onChange={(e) => setGlobalUrls(globalUrls.map(u => u.id === source.id ? { ...u, akileApiClient: e.target.value } : u))}
+                            onBlur={(e) => handleUpdateSource(source.id, { akileApiClient: e.target.value.trim() || undefined })}
+                            placeholder="Api-Client 访问密钥"
+                            className="w-full bg-black/40 border border-technical-border rounded-sm px-2.5 py-1.5 font-mono text-xs text-gray-300 focus:outline-none focus:border-technical-cyan/50"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[9px] font-display text-technical-muted uppercase tracking-widest mb-1">Api Secret</label>
+                          <input
+                            type="password"
+                            value={source.akileApiSecret ?? ''}
+                            onChange={(e) => setGlobalUrls(globalUrls.map(u => u.id === source.id ? { ...u, akileApiSecret: e.target.value } : u))}
+                            onBlur={(e) => handleUpdateSource(source.id, { akileApiSecret: e.target.value.trim() || undefined })}
+                            placeholder="Api-Secret 安全密钥"
+                            className="w-full bg-black/40 border border-technical-border rounded-sm px-2.5 py-1.5 font-mono text-xs text-gray-300 focus:outline-none focus:border-technical-cyan/50"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
                     <div className="flex items-center gap-3 pt-1">
                       <button
                         onClick={() => handleSourceRefresh(source.id)}

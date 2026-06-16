@@ -22,6 +22,9 @@ export interface UrlEntry {
   hysteria2Down?: string;
   hysteria2Mtu?: number;
   cacheTtl?: number;
+  akileServerId?: string;
+  akileApiClient?: string;
+  akileApiSecret?: string;
 }
 
 export interface SubscriptionGroup {
