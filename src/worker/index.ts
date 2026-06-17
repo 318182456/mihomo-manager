@@ -306,6 +306,9 @@ async function fetchAndExtractUrl(entry: UrlEntry): Promise<{ ok: boolean; url?:
       domains = [{ jumpUrl: urlToFetch }];
     }
 
+    const isHoshi = entry.refreshType === 'hoshi_v2board';
+    const apiPrefix = isHoshi ? '/data' : '/api/v1';
+
     const email = entry.refreshHeaders?.email || entry.refreshHeaders?.Email;
     const password = entry.refreshHeaders?.password || entry.refreshHeaders?.Password;
     if (!email || !password) {
@@ -318,14 +321,17 @@ async function fetchAndExtractUrl(entry: UrlEntry): Promise<{ ok: boolean; url?:
       if (!host) continue;
       try {
         // 2. 登录请求
-        const loginUrl = new URL('/data/passport/auth/login', host).toString();
+        const loginUrl = new URL(`${apiPrefix}/passport/auth/login`, host).toString();
+        const headers: Record<string, string> = {
+          'Content-Type': 'application/json',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        };
+        if (isHoshi) {
+          headers['X-Client-Type'] = 'Hoshi';
+        }
         const loginRes = await fetch(loginUrl, {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'X-Client-Type': 'Hoshi',
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-          },
+          headers,
           body: JSON.stringify({ email, password })
         });
 
@@ -335,21 +341,28 @@ async function fetchAndExtractUrl(entry: UrlEntry): Promise<{ ok: boolean; url?:
         }
 
         const loginJson = await loginRes.json() as any;
-        if (!loginJson.success || !loginJson.data?.auth_data) {
-          lastError = `Login failed: ${loginJson.data || 'unknown error'}`;
+        if (loginJson.success === false) {
+          lastError = `Login failed: success is false`;
           continue;
         }
 
-        const token = loginJson.data.auth_data;
+        const token = typeof loginJson.data === 'string' ? loginJson.data : (loginJson.data?.auth_data || loginJson.auth_data);
+        if (!token) {
+          lastError = `Login failed: missing token in response`;
+          continue;
+        }
 
         // 3. 获取最新订阅 URL
-        const subUrl = new URL('/data/user/getSubscribe', host).toString();
+        const subUrl = new URL(`${apiPrefix}/user/getSubscribe`, host).toString();
+        const subHeaders: Record<string, string> = {
+          'Authorization': token,
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        };
+        if (isHoshi) {
+          subHeaders['X-Client-Type'] = 'Hoshi';
+        }
         const subRes = await fetch(subUrl, {
-          headers: {
-            'Authorization': token,
-            'X-Client-Type': 'Hoshi',
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-          }
+          headers: subHeaders
         });
 
         if (!subRes.ok) {
@@ -358,13 +371,18 @@ async function fetchAndExtractUrl(entry: UrlEntry): Promise<{ ok: boolean; url?:
         }
 
         const subJson = await subRes.json() as any;
-        if (!subJson.success || !subJson.data?.subscribe_url) {
+        if (subJson.success === false) {
           lastError = `GetSubscribe response success is false`;
           continue;
         }
 
-        const subscribeUrl = subJson.data.subscribe_url;
-        return { ok: true, url: subscribeUrl, msg: '获取成功' };
+        const subscribeUrl = subJson.data?.subscribe_url || subJson.subscribe_url || (typeof subJson.data === 'string' ? subJson.data : '');
+        if (!subscribeUrl) {
+          lastError = `GetSubscribe response missing subscribe_url`;
+          continue;
+        }
+
+        return { ok: true, url: subscribeUrl.trim(), msg: '获取成功' };
       } catch (err) {
         lastError = String(err);
         console.error(`[v2board] 尝试节点 ${host} 出错:`, err);
