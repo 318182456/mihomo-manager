@@ -283,7 +283,7 @@ function normalizeUrls(raw: any[]): UrlEntry[] {
 
 /** 带超时限制的 fetch 封装 */
 async function fetchWithTimeout(url: string, options: RequestInit & { timeout?: number } = {}): Promise<Response> {
-  const { timeout = 8000, ...rest } = options;
+  const { timeout = 5000, ...rest } = options;
   const signal = (AbortSignal as any).timeout ? AbortSignal.timeout(timeout) : undefined;
   if (!signal) {
     const controller = new AbortController();
@@ -306,8 +306,8 @@ async function fetchAndExtractUrl(entry: UrlEntry): Promise<{ ok: boolean; url?:
   const urlToFetch = entry.refreshUrl.trim();
 
   if (entry.refreshType === 'hoshi_v2board' || entry.refreshType === 'v2board') {
-    // 1. 获取域名列表
     let domains: any[] = [];
+    let dataFetchFailed = false;
     if (entry.refreshType === 'hoshi_v2board') {
       try {
         const dataUrl = new URL('/data.json', urlToFetch).toString();
@@ -315,12 +315,13 @@ async function fetchAndExtractUrl(entry: UrlEntry): Promise<{ ok: boolean; url?:
           headers: {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
           },
-          timeout: 8000
+          timeout: 5000
         });
         domains = await dataRes.json() as any[];
       } catch (e) {
         console.error('[v2board] 获取动态域名列表失败, 尝试使用初始 URL:', e);
         domains = [{ jumpUrl: urlToFetch }];
+        dataFetchFailed = true;
       }
     } else {
       domains = [{ jumpUrl: urlToFetch }];
@@ -339,6 +340,10 @@ async function fetchAndExtractUrl(entry: UrlEntry): Promise<{ ok: boolean; url?:
     for (const d of domains) {
       const host = d.jumpUrl || d.checkUrl || urlToFetch;
       if (!host) continue;
+      if (dataFetchFailed && host === urlToFetch) {
+        lastError = '初始 URL 获取数据列表超时/失败，跳过登录尝试';
+        continue;
+      }
       try {
         // 2. 登录请求
         const loginUrl = new URL(`${apiPrefix}/passport/auth/login`, host).toString();
@@ -353,7 +358,7 @@ async function fetchAndExtractUrl(entry: UrlEntry): Promise<{ ok: boolean; url?:
           method: 'POST',
           headers,
           body: JSON.stringify({ email, password }),
-          timeout: 8000
+          timeout: 5000
         });
 
         if (!loginRes.ok) {
@@ -384,7 +389,7 @@ async function fetchAndExtractUrl(entry: UrlEntry): Promise<{ ok: boolean; url?:
         }
         const subRes = await fetchWithTimeout(subUrl, {
           headers: subHeaders,
-          timeout: 8000
+          timeout: 5000
         });
 
         if (!subRes.ok) {
@@ -421,7 +426,7 @@ async function fetchAndExtractUrl(entry: UrlEntry): Promise<{ ok: boolean; url?:
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
         ...(entry.refreshHeaders ?? {})
       },
-      timeout: 8000
+      timeout: 5000
     });
   } catch (e) {
     console.error(`[fetchAndExtractUrl] 请求失败:`, e);
