@@ -281,6 +281,25 @@ function normalizeUrls(raw: any[]): UrlEntry[] {
   });
 }
 
+/** 带超时限制的 fetch 封装 */
+async function fetchWithTimeout(url: string, options: RequestInit & { timeout?: number } = {}): Promise<Response> {
+  const { timeout = 8000, ...rest } = options;
+  const signal = (AbortSignal as any).timeout ? AbortSignal.timeout(timeout) : undefined;
+  if (!signal) {
+    const controller = new AbortController();
+    const id = setTimeout(() => controller.abort(), timeout);
+    try {
+      const response = await fetch(url, { ...rest, signal: controller.signal });
+      clearTimeout(id);
+      return response;
+    } catch (error) {
+      clearTimeout(id);
+      throw error;
+    }
+  }
+  return fetch(url, { ...rest, signal });
+}
+
 /** 从单个 UrlEntry 的 refreshUrl 接口拉取最新订阅链接 */
 async function fetchAndExtractUrl(entry: UrlEntry): Promise<{ ok: boolean; url?: string; msg: string }> {
   if (!entry.refreshUrl) return { ok: false, msg: '未配置 refreshUrl' };
@@ -292,10 +311,11 @@ async function fetchAndExtractUrl(entry: UrlEntry): Promise<{ ok: boolean; url?:
     if (entry.refreshType === 'hoshi_v2board') {
       try {
         const dataUrl = new URL('/data.json', urlToFetch).toString();
-        const dataRes = await fetch(dataUrl, {
+        const dataRes = await fetchWithTimeout(dataUrl, {
           headers: {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
-          }
+          },
+          timeout: 8000
         });
         domains = await dataRes.json() as any[];
       } catch (e) {
@@ -329,10 +349,11 @@ async function fetchAndExtractUrl(entry: UrlEntry): Promise<{ ok: boolean; url?:
         if (isHoshi) {
           headers['X-Client-Type'] = 'Hoshi';
         }
-        const loginRes = await fetch(loginUrl, {
+        const loginRes = await fetchWithTimeout(loginUrl, {
           method: 'POST',
           headers,
-          body: JSON.stringify({ email, password })
+          body: JSON.stringify({ email, password }),
+          timeout: 8000
         });
 
         if (!loginRes.ok) {
@@ -361,8 +382,9 @@ async function fetchAndExtractUrl(entry: UrlEntry): Promise<{ ok: boolean; url?:
         if (isHoshi) {
           subHeaders['X-Client-Type'] = 'Hoshi';
         }
-        const subRes = await fetch(subUrl, {
-          headers: subHeaders
+        const subRes = await fetchWithTimeout(subUrl, {
+          headers: subHeaders,
+          timeout: 8000
         });
 
         if (!subRes.ok) {
@@ -393,12 +415,13 @@ async function fetchAndExtractUrl(entry: UrlEntry): Promise<{ ok: boolean; url?:
 
   let resp: Response;
   try {
-    resp = await fetch(urlToFetch, {
+    resp = await fetchWithTimeout(urlToFetch, {
       headers: {
         'Accept': 'application/json',
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
         ...(entry.refreshHeaders ?? {})
       },
+      timeout: 8000
     });
   } catch (e) {
     console.error(`[fetchAndExtractUrl] 请求失败:`, e);
