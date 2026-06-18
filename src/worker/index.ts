@@ -1619,10 +1619,11 @@ async function fetchProxiesFromGroup(
             'public-key': pbk,
             ...(sid ? { 'short-id': sid } : {})
           };
-          // 清理可能存在的旧格式/扁平字段，保持配置干净
+          // 额外保留外层的 flat 字段以兼容旧版本内核/第三方 Meta 分支客户端
+          p['public-key'] = pbk;
+          if (sid) p['short-id'] = sid;
+          
           delete p.reality_opts;
-          delete p['public-key'];
-          delete p['short-id'];
         }
         
         if (p.network === 'grpc') {
