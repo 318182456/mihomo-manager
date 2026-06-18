@@ -1448,12 +1448,49 @@ function TemplatesView() {
         {activeTemplate ? (
           <>
             <div className="h-11 flex items-center justify-between border-b border-technical-border bg-black px-4">
-              <div className="flex h-full items-center gap-3">
+              <div className="flex h-full items-center gap-2 md:gap-3 flex-1 min-w-0">
+                {/* 移动端模版切换选择器 */}
+                <div className="flex lg:hidden items-center gap-1.5 shrink-0">
+                  <select
+                    value={activeId || ''}
+                    onChange={(e) => setActiveId(e.target.value || null)}
+                    className="bg-zinc-900 border border-technical-border rounded px-2 py-0.5 text-xs text-technical-cyan focus:outline-none focus:ring-1 focus:ring-technical-cyan/50 max-w-[100px] sm:max-w-[150px] font-medium"
+                  >
+                    {templates.map(t => (
+                      <option key={t.id} value={t.id}>{t.name}</option>
+                    ))}
+                  </select>
+                  <button
+                    onClick={handleAddTemplate}
+                    className="p-1 text-technical-muted hover:text-technical-cyan transition-colors"
+                    title="新建模板"
+                  >
+                    <Plus size={14} />
+                  </button>
+                  <button
+                    onClick={() => activeId && handleDeleteTemplate(activeId)}
+                    className="p-1 text-technical-muted hover:text-red-500 transition-colors"
+                    title="删除当前模板"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+
+                {/* 桌面端：只显示文本输入框来重命名 */}
                 <input 
                   type="text" 
                   value={activeTemplate.name}
                   onChange={(e) => setTemplates(templates.map(t => t.id === activeTemplate.id ? { ...t, name: e.target.value } : t))}
-                  className="bg-transparent border-none text-technical-cyan text-sm font-medium focus:outline-none focus:ring-0"
+                  className="bg-transparent border-none text-technical-cyan text-sm font-medium focus:outline-none focus:ring-0 hidden lg:block"
+                />
+
+                {/* 移动端：显示一个精简的输入框来重命名 */}
+                <input 
+                  type="text" 
+                  value={activeTemplate.name}
+                  onChange={(e) => setTemplates(templates.map(t => t.id === activeTemplate.id ? { ...t, name: e.target.value } : t))}
+                  className="bg-zinc-900 border border-technical-border rounded px-2 py-0.5 text-xs text-gray-300 focus:outline-none focus:ring-1 focus:ring-technical-cyan/50 max-w-[80px] sm:max-w-[120px] lg:hidden"
+                  placeholder="重命名"
                 />
               </div>
               <div className="flex items-center gap-2">
