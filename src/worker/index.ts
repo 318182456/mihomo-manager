@@ -1463,8 +1463,12 @@ function parseNodeURIs(text: string): any[] {
         }
         if (params.get('flow')) proxy.flow = params.get('flow');
         if (params.get('fp')) proxy.client_fingerprint = params.get('fp');
-        if (params.get('pbk')) proxy['public-key'] = params.get('pbk');
-        if (params.get('sid')) proxy['short-id'] = params.get('sid');
+        if (params.get('pbk')) {
+          proxy['reality-opts'] = { 'public-key': params.get('pbk') };
+        }
+        if (params.get('sid')) {
+          proxy['reality-opts'] = { ...proxy['reality-opts'], 'short-id': params.get('sid') };
+        }
         proxy.network = params.get('type') || 'tcp';
         if (proxy.network === 'ws') {
           proxy['ws-opts'] = { path: params.get('path') || '/', headers: { Host: params.get('host') || '' } };
@@ -1543,10 +1547,13 @@ function proxyToURI(p: any): string {
     if (p.servername) uri += `&sni=${encodeURIComponent(p.servername)}`;
     else if (p.sni) uri += `&sni=${encodeURIComponent(p.sni)}`;
     
-    if (p['public-key']) uri += `&pbk=${encodeURIComponent(p['public-key'])}`;
-    if (p['short-id']) uri += `&sid=${encodeURIComponent(p['short-id'])}`;
-    else if (p.reality_opts) {
-      uri += `&pbk=${encodeURIComponent(p.reality_opts['public-key'] || '')}&sid=${encodeURIComponent(p.reality_opts.short_id || '')}`;
+    const ro = p['reality-opts'] || p.reality_opts;
+    if (ro) {
+      const pbk = ro['public-key'] || ro.publicKey || p['public-key'] || '';
+      const sid = ro['short-id'] || ro.shortId || p['short-id'] || '';
+      uri += `&pbk=${encodeURIComponent(pbk)}&sid=${encodeURIComponent(sid)}`;
+    } else if (p['public-key']) {
+      uri += `&pbk=${encodeURIComponent(p['public-key'])}&sid=${encodeURIComponent(p['short-id'] || '')}`;
     }
     if (p['ws-opts']) uri += `&path=${encodeURIComponent(p['ws-opts'].path)}&host=${p['ws-opts'].headers?.Host || ''}`;
     return `${uri}#${name}`;
@@ -1601,13 +1608,23 @@ async function fetchProxiesFromGroup(
       if (!p || !p.name) continue;
       if (filterRe && !filterRe.test(p.name)) continue;
       
-      // 兼容并修正 Reality 嵌套结构以及 gRPC 协议的 flow 属性
+      // 兼容并规范化 Reality 结构（必须为 reality-opts 嵌套，且使用连字符 -）
       if (p.type === 'vless' || p.type === 'trojan') {
-        if (p['reality-opts']) {
-          if (p['reality-opts']['public-key']) p['public-key'] = p['reality-opts']['public-key'];
-          if (p['reality-opts']['short-id']) p['short-id'] = p['reality-opts']['short-id'];
-          delete p['reality-opts'];
+        const hasRo = p['reality-opts'] || p.reality_opts;
+        const pbk = p['public-key'] || (hasRo ? (hasRo['public-key'] || hasRo.publicKey) : undefined);
+        const sid = p['short-id'] || (hasRo ? (hasRo['short-id'] || hasRo.shortId) : undefined);
+        
+        if (pbk) {
+          p['reality-opts'] = {
+            'public-key': pbk,
+            ...(sid ? { 'short-id': sid } : {})
+          };
+          // 清理可能存在的旧格式/扁平字段，保持配置干净
+          delete p.reality_opts;
+          delete p['public-key'];
+          delete p['short-id'];
         }
+        
         if (p.network === 'grpc') {
           delete p.flow;
         }
