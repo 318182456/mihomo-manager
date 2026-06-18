@@ -1185,128 +1185,181 @@ async function updateSubscriptionCache(
   userAgent: string = 'clash.meta'
 ): Promise<SubscriptionCache> {
   const cacheKey = `sub_cache:${entry.id}`;
-  const urlToFetch = entry.url.trim();
-  if (!urlToFetch) {
+  
+  // 支持空格、逗号、分号或竖线分隔的多个 URL
+  const urls = entry.url.split(/[\s,;|]+/).map(u => u.trim()).filter(u => u.startsWith('http'));
+  if (urls.length === 0) {
     throw new Error('订阅源 URL 为空');
   }
 
-  // 1. 发起主请求 (默认 clash.meta UA)
-  const controller = new AbortController();
-  const id = setTimeout(() => controller.abort(), 15000); // 15秒超时保护
-
-  let data = '';
-  let userInfo = '';
-
-  try {
-    const response = await fetch(urlToFetch, {
-      signal: controller.signal,
-      headers: {
-        'User-Agent': userAgent,
-        ...(entry.refreshHeaders ?? {})
-      }
-    });
-
-    clearTimeout(id);
-
-    if (!response.ok) {
-      throw new Error(`上游响应错误 HTTP ${response.status} ${response.statusText}`);
-    }
-
-    data = await response.text();
-    userInfo = response.headers.get('subscription-userinfo') || response.headers.get('Subscription-Userinfo') || '';
-
-  } catch (err: any) {
-    clearTimeout(id);
-    throw new Error(`网络拉取失败: ${err.message || String(err)}`);
-  }
-
-  // 2. 如果配置了 Akile API，优先用 Akile API 的流量数据覆盖/作为 userInfo
-  if (entry.akileServerId && entry.akileApiClient && entry.akileApiSecret) {
+  // 辅助函数：拉取单个 URL
+  const fetchOne = async (url: string) => {
+    const controller = new AbortController();
+    const id = setTimeout(() => controller.abort(), 15000); // 15秒超时保护
     try {
-      const cleanVal = (val?: string) => {
-        if (!val) return '';
-        let s = val.trim();
-        if ((s.startsWith('"') && s.endsWith('"')) || (s.startsWith("'") && s.endsWith("'"))) {
-          s = s.slice(1, -1).trim();
-        }
-        return s;
-      };
-
-      const serverId = cleanVal(entry.akileServerId);
-      const apiClient = cleanVal(entry.akileApiClient);
-      const apiSecret = cleanVal(entry.akileApiSecret);
-
-      const akileRes = await fetch('https://api.akile.ai/api/v1/api/server/GetServerList', {
-        method: 'POST',
+      const response = await fetch(url, {
+        signal: controller.signal,
         headers: {
-          'accept': 'application/json',
-          'Api-Client': apiClient,
-          'Api-Secret': apiSecret,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          page_num: 1,
-          page_size: 100
-        })
-      });
-      if (akileRes.ok) {
-        const akileJson = await akileRes.json() as any;
-        if (akileJson.status_code === 0 && Array.isArray(akileJson.list)) {
-          const item = akileJson.list.find((s: any) => 
-            s.id?.toString() === serverId || 
-            s.server_id === serverId || 
-            s.server_name === serverId
-          );
-          if (item) {
-            const used = item.used_flow ?? 0;
-            const total = (item.flow ?? 0) * 1024 * 1024 * 1024;
-            const expire = item.due_time ?? 0;
-            userInfo = `upload=0; download=${used}; total=${total}; expire=${expire}`;
-            console.log(`[Akile API] 成功获取流量信息: ${userInfo}`);
-          } else {
-            console.error(`[Akile API] 未在列表中找到 serverId: ${serverId}`);
-          }
-        } else {
-          console.error(`[Akile API] 接口返回错误: ${akileJson.status_msg}`);
-        }
-      } else {
-        console.error(`[Akile API] HTTP 错误: ${akileRes.status}`);
-      }
-    } catch (e) {
-      console.error(`[Akile API] 请求异常:`, e);
-    }
-  }
-
-  // 3. 如果没有 userInfo 且未配置 Akile API，尝试用 Clash UA 悄悄拉取一次流量信息 (非强制，失败则吞掉)
-  if (!userInfo && !(entry.akileServerId && entry.akileApiClient && entry.akileApiSecret)) {
-    const infoController = new AbortController();
-    const infoTimeout = setTimeout(() => infoController.abort(), 8000); // 8秒超时即可
-
-    try {
-      const infoResponse = await fetch(urlToFetch, {
-        signal: infoController.signal,
-        headers: {
-          'User-Agent': 'Clash/1.8.0',
+          'User-Agent': userAgent,
           ...(entry.refreshHeaders ?? {})
         }
       });
-      clearTimeout(infoTimeout);
-      if (infoResponse.ok) {
-        userInfo = infoResponse.headers.get('subscription-userinfo') || infoResponse.headers.get('Subscription-Userinfo') || '';
+      clearTimeout(id);
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
       }
-    } catch (e) {
-      clearTimeout(infoTimeout);
-      console.warn(`[Cache Info Update] 辅助获取流量信息失败 (已忽略): ${e}`);
+      const text = await response.text();
+      const info = response.headers.get('subscription-userinfo') || response.headers.get('Subscription-Userinfo') || '';
+      return { text, info };
+    } catch (err: any) {
+      clearTimeout(id);
+      throw err;
+    }
+  };
+
+  let mergedData = '';
+  let mergedUserInfo = '';
+
+  if (urls.length === 1) {
+    // 单 URL 逻辑（保持原有逻辑，并处理 Akile / 自动流量获取）
+    const { text, info } = await fetchOne(urls[0]);
+    mergedData = text;
+    mergedUserInfo = info;
+    
+    // 如果配置了 Akile API，优先用 Akile API 的流量数据覆盖/作为 userInfo
+    if (entry.akileServerId && entry.akileApiClient && entry.akileApiSecret) {
+      try {
+        const cleanVal = (val?: string) => {
+          if (!val) return '';
+          let s = val.trim();
+          if ((s.startsWith('"') && s.endsWith('"')) || (s.startsWith("'") && s.endsWith("'"))) {
+            s = s.slice(1, -1).trim();
+          }
+          return s;
+        };
+
+        const serverId = cleanVal(entry.akileServerId);
+        const apiClient = cleanVal(entry.akileApiClient);
+        const apiSecret = cleanVal(entry.akileApiSecret);
+
+        const akileRes = await fetch('https://api.akile.ai/api/v1/api/server/GetServerList', {
+          method: 'POST',
+          headers: {
+            'accept': 'application/json',
+            'Api-Client': apiClient,
+            'Api-Secret': apiSecret,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            page_num: 1,
+            page_size: 100
+          })
+        });
+        if (akileRes.ok) {
+          const akileJson = await akileRes.json() as any;
+          if (akileJson.status_code === 0 && Array.isArray(akileJson.list)) {
+            const item = akileJson.list.find((s: any) => 
+              s.id?.toString() === serverId || 
+              s.server_id === serverId || 
+              s.server_name === serverId
+            );
+            if (item) {
+              const used = item.used_flow ?? 0;
+              const total = (item.flow ?? 0) * 1024 * 1024 * 1024;
+              const expire = item.due_time ?? 0;
+              mergedUserInfo = `upload=0; download=${used}; total=${total}; expire=${expire}`;
+              console.log(`[Akile API] 成功获取流量信息: ${mergedUserInfo}`);
+            }
+          }
+        }
+      } catch (e) {
+        console.error(`[Akile API] 请求异常:`, e);
+      }
+    }
+
+    // 如果没有 userInfo 且未配置 Akile API，尝试用 Clash UA 悄悄拉取一次流量信息 (非强制，失败则吞掉)
+    if (!mergedUserInfo && !(entry.akileServerId && entry.akileApiClient && entry.akileApiSecret)) {
+      const infoController = new AbortController();
+      const infoTimeout = setTimeout(() => infoController.abort(), 8000);
+      try {
+        const infoResponse = await fetch(urls[0], {
+          signal: infoController.signal,
+          headers: {
+            'User-Agent': 'Clash/1.8.0',
+            ...(entry.refreshHeaders ?? {})
+          }
+        });
+        clearTimeout(infoTimeout);
+        if (infoResponse.ok) {
+          mergedUserInfo = infoResponse.headers.get('subscription-userinfo') || infoResponse.headers.get('Subscription-Userinfo') || '';
+        }
+      } catch (e) {
+        clearTimeout(infoTimeout);
+      }
+    }
+  } else {
+    // 多 URL 并行获取与合并逻辑
+    const results = await Promise.allSettled(urls.map(url => fetchOne(url)));
+    const allProxies: any[] = [];
+    let totalUpload = 0, totalDownload = 0, totalTotal = 0, minExpire = 0;
+    let hasUserInfo = false;
+    let successCount = 0;
+
+    for (const res of results) {
+      if (res.status === 'fulfilled') {
+        successCount++;
+        const { text, info } = res.value;
+        
+        // 解析流量信息
+        if (info) {
+          hasUserInfo = true;
+          const matchUp = info.match(/upload\s*=\s*(\d+)/i);
+          const matchDown = info.match(/download\s*=\s*(\d+)/i);
+          const matchTotal = info.match(/total\s*=\s*(\d+)/i);
+          const matchExpire = info.match(/expire\s*=\s*(\d+)/i);
+          if (matchUp) totalUpload += parseInt(matchUp[1], 10);
+          if (matchDown) totalDownload += parseInt(matchDown[1], 10);
+          if (matchTotal) totalTotal += parseInt(matchTotal[1], 10);
+          if (matchExpire) {
+            const exp = parseInt(matchExpire[1], 10);
+            if (exp > 0 && (minExpire === 0 || exp < minExpire)) minExpire = exp;
+          }
+        }
+
+        // 解析节点列表
+        let parsed: any[] = [];
+        if (isNodeList(text)) {
+          parsed = parseNodeURIs(text);
+        } else {
+          try {
+            const yml = jsyaml.load(text) as any;
+            if (yml && Array.isArray(yml.proxies)) {
+              parsed = yml.proxies;
+            }
+          } catch {}
+        }
+        allProxies.push(...parsed);
+      }
+    }
+
+    if (successCount === 0) {
+      throw new Error('所有配置的子订阅源均拉取失败');
+    }
+
+    // 将多源合并后的代理节点输出为 YAML 格式
+    mergedData = jsyaml.dump({ proxies: allProxies }, { lineWidth: -1 });
+    if (hasUserInfo) {
+      mergedUserInfo = `upload=${totalUpload}; download=${totalDownload}; total=${totalTotal}; expire=${minExpire}`;
     }
   }
 
   const newCache: SubscriptionCache = {
     lastCacheUpdate: Math.floor(Date.now() / 1000),
-    data,
-    userInfo
+    data: mergedData,
+    userInfo: mergedUserInfo
   };
 
-  // 3. 一次性写入 KV
+  // 写入 KV 缓存
   await env.KV.put(cacheKey, JSON.stringify(newCache));
   console.log(`[Cache] 订阅源 ${entry.name || entry.id} 缓存更新成功`);
   return newCache;
@@ -1584,8 +1637,6 @@ async function fetchProxiesFromGroup(
   const rawYamls: string[] = [];
   const proxies: any[] = [];
 
-  const seenNames = new Set<string>();
-
   for (let i = 0; i < results.length; i++) {
     const res = results[i];
     if (res.status !== 'fulfilled' || !res.value) continue;
@@ -1638,23 +1689,6 @@ async function fetchProxiesFromGroup(
         if (entry.hysteria2Down) p.down = entry.hysteria2Down;
         if (entry.hysteria2Mtu) p.mtu = entry.hysteria2Mtu;
       }
-
-      // 检查节点名重名冲突，若冲突则自动加上订阅源名称作为区分后缀，防止 Clash 报错或忽略
-      let finalName = p.name;
-      if (seenNames.has(finalName)) {
-        const suffix = entry.name ? ` (${entry.name})` : ` (Dup)`;
-        finalName = `${finalName}${suffix}`;
-        
-        let dedupName = finalName;
-        let counter = 1;
-        while (seenNames.has(dedupName)) {
-          dedupName = `${finalName} #${counter}`;
-          counter++;
-        }
-        p.name = dedupName;
-      }
-      seenNames.add(p.name);
-
       proxies.push(p);
     }
   }
