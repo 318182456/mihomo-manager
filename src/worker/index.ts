@@ -1600,6 +1600,19 @@ async function fetchProxiesFromGroup(
     for (const p of parsed) {
       if (!p || !p.name) continue;
       if (filterRe && !filterRe.test(p.name)) continue;
+      
+      // 兼容并修正 Reality 嵌套结构以及 gRPC 协议的 flow 属性
+      if (p.type === 'vless' || p.type === 'trojan') {
+        if (p['reality-opts']) {
+          if (p['reality-opts']['public-key']) p['public-key'] = p['reality-opts']['public-key'];
+          if (p['reality-opts']['short-id']) p['short-id'] = p['reality-opts']['short-id'];
+          delete p['reality-opts'];
+        }
+        if (p.network === 'grpc') {
+          delete p.flow;
+        }
+      }
+
       if (p.type === 'hysteria2') {
         if (entry.hysteria2Up) p.up = entry.hysteria2Up;
         if (entry.hysteria2Down) p.down = entry.hysteria2Down;
