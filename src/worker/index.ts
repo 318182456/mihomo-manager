@@ -1584,6 +1584,8 @@ async function fetchProxiesFromGroup(
   const rawYamls: string[] = [];
   const proxies: any[] = [];
 
+  const seenNames = new Set<string>();
+
   for (let i = 0; i < results.length; i++) {
     const res = results[i];
     if (res.status !== 'fulfilled' || !res.value) continue;
@@ -1636,6 +1638,23 @@ async function fetchProxiesFromGroup(
         if (entry.hysteria2Down) p.down = entry.hysteria2Down;
         if (entry.hysteria2Mtu) p.mtu = entry.hysteria2Mtu;
       }
+
+      // 检查节点名重名冲突，若冲突则自动加上订阅源名称作为区分后缀，防止 Clash 报错或忽略
+      let finalName = p.name;
+      if (seenNames.has(finalName)) {
+        const suffix = entry.name ? ` (${entry.name})` : ` (Dup)`;
+        finalName = `${finalName}${suffix}`;
+        
+        let dedupName = finalName;
+        let counter = 1;
+        while (seenNames.has(dedupName)) {
+          dedupName = `${finalName} #${counter}`;
+          counter++;
+        }
+        p.name = dedupName;
+      }
+      seenNames.add(p.name);
+
       proxies.push(p);
     }
   }
