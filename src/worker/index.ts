@@ -1457,11 +1457,14 @@ function parseNodeURIs(text: string): any[] {
         else proxy.password = url.username;
         const params = url.searchParams;
         if (params.get('security') === 'tls' || params.get('security') === 'reality') proxy.tls = true;
-        if (params.get('sni')) proxy.sni = params.get('sni');
+        if (params.get('sni')) {
+          proxy.servername = params.get('sni');
+          proxy.sni = params.get('sni');
+        }
         if (params.get('flow')) proxy.flow = params.get('flow');
         if (params.get('fp')) proxy.client_fingerprint = params.get('fp');
-        if (params.get('pbk')) proxy.reality_opts = { 'public-key': params.get('pbk') };
-        if (params.get('sid')) proxy.reality_opts = { ...proxy.reality_opts, short_id: params.get('sid') };
+        if (params.get('pbk')) proxy['public-key'] = params.get('pbk');
+        if (params.get('sid')) proxy['short-id'] = params.get('sid');
         proxy.network = params.get('type') || 'tcp';
         if (proxy.network === 'ws') {
           proxy['ws-opts'] = { path: params.get('path') || '/', headers: { Host: params.get('host') || '' } };
@@ -1537,9 +1540,13 @@ function proxyToURI(p: any): string {
   if (p.type === 'vless' || p.type === 'trojan') {
     let uri = `${p.type}://${p.type === 'vless' ? p.uuid : p.password}@${p.server}:${p.port}?type=${p.network || 'tcp'}`;
     if (p.tls) uri += `&security=tls`;
-    if (p.sni) uri += `&sni=${p.sni}`;
-    if (p.reality_opts) {
-      uri += `&security=reality&pbk=${encodeURIComponent(p.reality_opts['public-key'] || '')}&sid=${p.reality_opts.short_id || ''}`;
+    if (p.servername) uri += `&sni=${encodeURIComponent(p.servername)}`;
+    else if (p.sni) uri += `&sni=${encodeURIComponent(p.sni)}`;
+    
+    if (p['public-key']) uri += `&pbk=${encodeURIComponent(p['public-key'])}`;
+    if (p['short-id']) uri += `&sid=${encodeURIComponent(p['short-id'])}`;
+    else if (p.reality_opts) {
+      uri += `&pbk=${encodeURIComponent(p.reality_opts['public-key'] || '')}&sid=${encodeURIComponent(p.reality_opts.short_id || '')}`;
     }
     if (p['ws-opts']) uri += `&path=${encodeURIComponent(p['ws-opts'].path)}&host=${p['ws-opts'].headers?.Host || ''}`;
     return `${uri}#${name}`;
