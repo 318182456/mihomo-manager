@@ -1947,6 +1947,59 @@ async function renderTemplate(template: string, group: SubscriptionGroup, filter
     .replace(/\{\{GROUP_EXCLUDE\}\}/g, goExclude)
     .replace(/\{\{GENERATED_AT\}\}/g,  new Date().toISOString());
 
+  // 5. {{DOWNLOAD: url [| path: path]}} 在线分流/规则同步
+  const downloadLineRegex = /^([ \t]*)\{\{DOWNLOAD:\s*([^}|]+?)(?:\s*\|\s*path:\s*([^}]+?))?\}\}/gm;
+  const downloadPromises: { fullMatch: string; indent: string; url: string; path?: string; promise: Promise<string> }[] = [];
+  
+  let downloadMatch;
+  while ((downloadMatch = downloadLineRegex.exec(output)) !== null) {
+    const fullMatch = downloadMatch[0];
+    const indent = downloadMatch[1] || '';
+    const url = downloadMatch[2].trim();
+    const path = downloadMatch[3]?.trim();
+    
+    if (!downloadPromises.some(p => p.fullMatch === fullMatch)) {
+      const promise = (async () => {
+        try {
+          const rawYaml = await fetchWithCache(url, env.KV);
+          const extracted = extractYamlPath(rawYaml, path);
+          return indentString(extracted, indent);
+        } catch (e) {
+          console.error(`[Download Error] Failed to download or parse ${url}:`, e);
+          return indentString(`# [ERROR: Failed to download or parse '${url}': ${String(e)}]`, indent);
+        }
+      })();
+      downloadPromises.push({ fullMatch, indent, url, path, promise });
+    }
+  }
+
+  // 行内匹配兜底
+  const downloadInlineRegex = /\{\{DOWNLOAD:\s*([^}|]+?)(?:\s*\|\s*path:\s*([^}]+?))?\}\}/g;
+  while ((downloadMatch = downloadInlineRegex.exec(output)) !== null) {
+    const fullMatch = downloadMatch[0];
+    if (downloadPromises.some(p => p.fullMatch.includes(fullMatch))) {
+      continue;
+    }
+    const url = downloadMatch[1].trim();
+    const path = downloadMatch[2]?.trim();
+    
+    const promise = (async () => {
+      try {
+        const rawYaml = await fetchWithCache(url, env.KV);
+        return extractYamlPath(rawYaml, path);
+      } catch (e) {
+        console.error(`[Download Error] Failed to download or parse ${url}:`, e);
+        return `# [ERROR: Failed to download or parse '${url}': ${String(e)}]`;
+      }
+    })();
+    downloadPromises.push({ fullMatch, indent: '', url, path, promise });
+  }
+
+  for (const dp of downloadPromises) {
+    const replacement = await dp.promise;
+    output = output.split(dp.fullMatch).join(replacement);
+  }
+
   // 清理 flow sequence [...] 中的空项和多余逗号
   output = output.replace(/\[([^\]]*)\]/g, (match, content) => {
     const cleaned = content
@@ -1973,3 +2026,79 @@ function subResponse(content: string, name: string, userInfo: string, isNodes = 
     },
   });
 }
+
+/**
+ * 缓存外部获取到的 YAML 配置，避免频繁拉取 GitHub 接口限制
+ */
+async function fetchWithCache(url: string, kv: KVNamespace, ttl: number = 86400): Promise<string> {
+  const cacheKey = `external_cache:${url}`;
+  try {
+    const cached = await kv.get(cacheKey);
+    if (cached) {
+      console.log(`[Cache Hit] ${url}`);
+      return cached;
+    }
+  } catch (e) {
+    console.error(`[Cache Error] Failed to read from KV:`, e);
+  }
+
+  console.log(`[Cache Miss] Fetching ${url}`);
+  const resp = await fetch(url, {
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+    }
+  });
+
+  if (!resp.ok) {
+    throw new Error(`HTTP ${resp.status} for URL: ${url}`);
+  }
+
+  const content = await resp.text();
+  try {
+    await kv.put(cacheKey, content, { expirationTtl: ttl });
+  } catch (e) {
+    console.error(`[Cache Error] Failed to write to KV:`, e);
+  }
+  return content;
+}
+
+/**
+ * 解析 YAML 并根据指定路径（如 rules 或 dns.nameserver）提取子项
+ */
+function extractYamlPath(yamlContent: string, pathExpression?: string): string {
+  if (!pathExpression) {
+    return yamlContent;
+  }
+  const parsed = jsyaml.load(yamlContent);
+  if (!parsed || typeof parsed !== 'object') {
+    throw new Error('Parsed YAML is not an object/dictionary');
+  }
+
+  const parts = pathExpression.trim().split('.');
+  let val: any = parsed;
+  for (const part of parts) {
+    if (val == null || typeof val !== 'object') {
+      val = undefined;
+      break;
+    }
+    val = val[part];
+  }
+
+  if (val === undefined) {
+    throw new Error(`Path '${pathExpression}' not found in YAML`);
+  }
+
+  if (typeof val === 'string') {
+    return val;
+  }
+  return jsyaml.dump(val, { lineWidth: -1, noRefs: true });
+}
+
+/**
+ * 根据模版中的前导缩进调整下载的 YAML 内容的缩进
+ */
+function indentString(str: string, indent: string): string {
+  if (!indent) return str;
+  return str.split('\n').map(line => line.trim() ? indent + line : line).join('\n');
+}
+
