@@ -522,6 +522,38 @@ function SubscriptionsView() {
     }
   };
 
+  const handleImportUrls = async () => {
+    const text = prompt('请输入订阅源 URL（支持输入多个，换行或空格/逗号分隔）：');
+    if (!text) return;
+    const urls = text.split(/[\s,;|]+/).map(u => u.trim()).filter(u => u.startsWith('http://') || u.startsWith('https://'));
+    if (urls.length === 0) {
+      alert('未检测到有效的 URL 地址（须以 http:// 或 https:// 开头）');
+      return;
+    }
+    
+    let successCount = 0;
+    for (const url of urls) {
+      try {
+        let name = '导入源';
+        try {
+          const u = new URL(url);
+          name = u.hostname;
+          const pathname = u.pathname.split('/').filter(Boolean).pop();
+          if (pathname && pathname.length > 3) {
+            name = `${name}/${pathname}`;
+          }
+        } catch {}
+        
+        await api.createUrl({ url, name });
+        successCount++;
+      } catch (e) {
+        console.error('导入源失败:', url, e);
+      }
+    }
+    alert(`成功导入 ${successCount} 个订阅源`);
+    loadData();
+  };
+
   const handleDeleteSource = async (id: string) => {
     if (!confirm('确定删除此订阅源吗？(删除后，所有包含此源的订阅组将自动移除此引用)')) return;
     try {
@@ -593,9 +625,14 @@ function SubscriptionsView() {
             <Plus size={14} /><span>添加组</span>
           </button>
         ) : (
-          <button className="technical-button-primary" onClick={handleAddSource}>
-            <Plus size={14} /><span>添加订阅源</span>
-          </button>
+          <div className="flex gap-2">
+            <button className="technical-button-outline border-technical-cyan/30 text-technical-cyan hover:bg-technical-cyan/5" onClick={handleImportUrls}>
+              <LogIn size={14} /><span>导入 URL</span>
+            </button>
+            <button className="technical-button-primary" onClick={handleAddSource}>
+              <Plus size={14} /><span>添加订阅源</span>
+            </button>
+          </div>
         )}
       </div>
 
