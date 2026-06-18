@@ -1467,6 +1467,7 @@ function parseNodeURIs(text: string): any[] {
           proxy['ws-opts'] = { path: params.get('path') || '/', headers: { Host: params.get('host') || '' } };
         } else if (proxy.network === 'grpc') {
           proxy['grpc-opts'] = { 'grpc-service-name': params.get('serviceName') || '' };
+          delete proxy.flow;
         }
       } else if (protocol === 'hysteria2' || protocol === 'hy2') {
         proxy.type = 'hysteria2';
