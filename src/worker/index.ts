@@ -184,6 +184,7 @@ export interface UrlEntry {
   cfOptimize?: boolean;
   cfOptimizeNum?: number;
   cfOptimizeOnlyCdn?: boolean;
+  cfOptimizeDomain?: string;
 }
 
 export interface SubscriptionGroup {
@@ -1804,24 +1805,39 @@ async function fetchProxiesFromGroup(
 
 
 
-      if (entry.cfOptimize && isCdn && cfIps.length > 0) {
-        const limit = entry.cfOptimizeNum || 5;
+      if (entry.cfOptimize && isCdn && (cfIps.length > 0 || entry.cfOptimizeDomain)) {
         const originalServer = p.server;
         const hostDomain = p.servername || p.sni || originalServer;
 
         // 保留原节点
         proxies.push(p);
 
+        // 获取优选列表 (如果是自定义域名/IP，优先使用)
+        let targets: { ip: string; isp: string }[] = [];
+        if (entry.cfOptimizeDomain) {
+          const customList = entry.cfOptimizeDomain.split(/[,，\s]+/).map(x => x.trim()).filter(Boolean);
+          targets = customList.map((val, idx) => ({
+            ip: val,
+            isp: customList.length === 1 ? '优选' : `优选 ${idx + 1}`
+          }));
+        } else {
+          const limit = entry.cfOptimizeNum || 5;
+          const optimizedIps = cfIps.slice(0, limit);
+          const ispCounts: Record<string, number> = {};
+          targets = optimizedIps.map(opt => {
+            if (!ispCounts[opt.isp]) ispCounts[opt.isp] = 0;
+            ispCounts[opt.isp]++;
+            return {
+              ip: opt.ip,
+              isp: `${opt.isp} ${ispCounts[opt.isp]}`
+            };
+          });
+        }
+
         // 克隆出优选 IP 节点
-        const optimizedIps = cfIps.slice(0, limit);
-        const ispCounts: Record<string, number> = {};
-
-        optimizedIps.forEach((opt) => {
-          if (!ispCounts[opt.isp]) ispCounts[opt.isp] = 0;
-          ispCounts[opt.isp]++;
-
+        targets.forEach((opt) => {
           const cloned = JSON.parse(JSON.stringify(p));
-          cloned.name = `${p.name} - ${opt.isp} ${ispCounts[opt.isp]}`;
+          cloned.name = `${p.name} - ${opt.isp}`;
           cloned.server = opt.ip;
           cloned.port = 443;
 

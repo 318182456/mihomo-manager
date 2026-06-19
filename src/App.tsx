@@ -1373,6 +1373,25 @@ function SubscriptionsView() {
                           </label>
                         </div>
                       </div>
+                      {/* 自定义优选域名/IP */}
+                      <div className="pt-2">
+                        <label className="block text-[9px] font-display text-technical-muted uppercase tracking-widest mb-1">
+                          自定义优选域名/IP（以逗号/空格分隔，选填。留空则默认使用系统优选测速 API）
+                        </label>
+                        <input
+                          type="text"
+                          disabled={!source.cfOptimize}
+                          value={source.cfOptimizeDomain ?? ''}
+                          onChange={(e) => {
+                            setGlobalUrls(globalUrls.map(u => u.id === source.id ? { ...u, cfOptimizeDomain: e.target.value } : u));
+                          }}
+                          onBlur={(e) => {
+                            handleUpdateSource(source.id, { cfOptimizeDomain: e.target.value.trim() || undefined });
+                          }}
+                          placeholder="如: 318182456.cf.090227.xyz"
+                          className="w-full bg-black/40 border border-technical-border rounded-sm px-2.5 py-1.5 font-mono text-xs text-gray-300 focus:outline-none focus:border-technical-cyan/50 disabled:opacity-40"
+                        />
+                      </div>
                     </div>
 
                     <div className="flex items-center gap-3 pt-1">
