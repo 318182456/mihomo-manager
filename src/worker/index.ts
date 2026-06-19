@@ -1800,10 +1800,7 @@ async function fetchProxiesFromGroup(
         (p.tls || p.security === 'tls')
       );
 
-      // 启用优选 IP 优化时，自动过滤丢弃非 CDN 节点
-      if (entry.cfOptimize && !isCdn) {
-        continue;
-      }
+
 
       if (entry.cfOptimize && isCdn && cfIps.length > 0) {
         const limit = entry.cfOptimizeNum || 5;
