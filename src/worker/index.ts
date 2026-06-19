@@ -1796,8 +1796,8 @@ async function fetchProxiesFromGroup(
 
       const isCdn = p.name.toLowerCase().includes('cdn') || (
         (p.type === 'vmess' || p.type === 'vless' || p.type === 'trojan') && 
-        (p.network === 'ws' || p.network === 'grpc') && 
-        (p.tls || p.security === 'tls' || p.security === 'reality')
+        p.network === 'ws' && 
+        (p.tls || p.security === 'tls')
       );
 
       // 启用优选 IP 优化时，自动过滤丢弃非 CDN 节点
