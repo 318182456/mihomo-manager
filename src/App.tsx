@@ -1357,6 +1357,21 @@ function SubscriptionsView() {
                             className="w-full bg-black/40 border border-technical-border rounded-sm px-2.5 py-1.5 font-mono text-xs text-gray-300 focus:outline-none focus:border-technical-cyan/50 disabled:opacity-40"
                           />
                         </div>
+                        <div className="flex items-center">
+                          <label className={`flex items-center gap-2 text-[11px] text-technical-muted select-none ${source.cfOptimize ? 'cursor-pointer' : 'cursor-not-allowed'}`}>
+                            <input
+                              type="checkbox"
+                              disabled={!source.cfOptimize}
+                              checked={source.cfOptimizeOnlyCdn ?? false}
+                              onChange={(e) => {
+                                setGlobalUrls(globalUrls.map(u => u.id === source.id ? { ...u, cfOptimizeOnlyCdn: e.target.checked } : u));
+                                handleUpdateSource(source.id, { cfOptimizeOnlyCdn: e.target.checked });
+                              }}
+                              className="bg-black/40 border border-technical-border rounded-sm text-technical-cyan focus:ring-0 outline-none w-3.5 h-3.5 disabled:opacity-40"
+                            />
+                            <span>仅对名称包含 "cdn" 的节点优化</span>
+                          </label>
+                        </div>
                       </div>
                     </div>
 

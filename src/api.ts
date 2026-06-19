@@ -27,6 +27,7 @@ export interface UrlEntry {
   akileApiSecret?: string;
   cfOptimize?: boolean;
   cfOptimizeNum?: number;
+  cfOptimizeOnlyCdn?: boolean;
 }
 
 export interface SubscriptionGroup {

@@ -183,6 +183,7 @@ export interface UrlEntry {
   akileApiSecret?: string;
   cfOptimize?: boolean;
   cfOptimizeNum?: number;
+  cfOptimizeOnlyCdn?: boolean;
 }
 
 export interface SubscriptionGroup {
@@ -1795,6 +1796,7 @@ async function fetchProxiesFromGroup(
       }
 
       const isCdn = p.name.toLowerCase().includes('cdn') || (
+        !entry.cfOptimizeOnlyCdn &&
         (p.type === 'vmess' || p.type === 'vless' || p.type === 'trojan') && 
         p.network === 'ws' && 
         (p.tls || p.security === 'tls')
