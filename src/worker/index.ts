@@ -1794,52 +1794,54 @@ async function fetchProxiesFromGroup(
         if (entry.hysteria2Mtu) p.mtu = entry.hysteria2Mtu;
       }
 
-      if (entry.cfOptimize && cfIps.length > 0) {
-        const isCdn = p.name.toLowerCase().includes('cdn') || (
-          (p.type === 'vmess' || p.type === 'vless' || p.type === 'trojan') && 
-          (p.network === 'ws' || p.network === 'grpc') && 
-          (p.tls || p.security === 'tls' || p.security === 'reality')
-        );
+      const isCdn = p.name.toLowerCase().includes('cdn') || (
+        (p.type === 'vmess' || p.type === 'vless' || p.type === 'trojan') && 
+        (p.network === 'ws' || p.network === 'grpc') && 
+        (p.tls || p.security === 'tls' || p.security === 'reality')
+      );
 
-        if (isCdn) {
-          const limit = entry.cfOptimizeNum || 5;
-          const originalServer = p.server;
+      // 启用优选 IP 优化时，自动过滤丢弃非 CDN 节点
+      if (entry.cfOptimize && !isCdn) {
+        continue;
+      }
 
-          // 保留原节点
-          proxies.push(p);
+      if (entry.cfOptimize && isCdn && cfIps.length > 0) {
+        const limit = entry.cfOptimizeNum || 5;
+        const originalServer = p.server;
+        const hostDomain = p.servername || p.sni || originalServer;
 
-          // 克隆出优选 IP 节点
-          const optimizedIps = cfIps.slice(0, limit);
-          const ispCounts: Record<string, number> = {};
+        // 保留原节点
+        proxies.push(p);
 
-          optimizedIps.forEach((opt) => {
-            if (!ispCounts[opt.isp]) ispCounts[opt.isp] = 0;
-            ispCounts[opt.isp]++;
+        // 克隆出优选 IP 节点
+        const optimizedIps = cfIps.slice(0, limit);
+        const ispCounts: Record<string, number> = {};
 
-            const cloned = JSON.parse(JSON.stringify(p));
-            cloned.name = `${p.name} - ${opt.isp} ${ispCounts[opt.isp]}`;
-            cloned.server = opt.ip;
-            cloned.port = 443;
+        optimizedIps.forEach((opt) => {
+          if (!ispCounts[opt.isp]) ispCounts[opt.isp] = 0;
+          ispCounts[opt.isp]++;
 
-            // 保持 SNI
-            if (!cloned.sni && !cloned.servername) {
-              cloned.sni = originalServer;
-              cloned.servername = originalServer;
+          const cloned = JSON.parse(JSON.stringify(p));
+          cloned.name = `${p.name} - ${opt.isp} ${ispCounts[opt.isp]}`;
+          cloned.server = opt.ip;
+          cloned.port = 443;
+
+          // 保持 SNI
+          if (!cloned.sni) cloned.sni = hostDomain;
+          if (!cloned.servername) cloned.servername = hostDomain;
+
+          // 对于 ws 传输，保持 Host
+          if (cloned.network === 'ws' || cloned.type === 'vmess') {
+            if (!cloned['ws-opts']) cloned['ws-opts'] = { path: '/' };
+            if (!cloned['ws-opts'].headers) cloned['ws-opts'].headers = {};
+            if (!cloned['ws-opts'].headers.Host && !cloned['ws-opts'].headers.host) {
+              cloned['ws-opts'].headers.Host = hostDomain;
             }
+          }
 
-            // 对于 ws 传输，保持 Host
-            if (cloned.network === 'ws' || cloned.type === 'vmess') {
-              if (!cloned['ws-opts']) cloned['ws-opts'] = { path: '/' };
-              if (!cloned['ws-opts'].headers) cloned['ws-opts'].headers = {};
-              if (!cloned['ws-opts'].headers.Host && !cloned['ws-opts'].headers.host) {
-                cloned['ws-opts'].headers.Host = originalServer;
-              }
-            }
-
-            proxies.push(cloned);
-          });
-          continue;
-        }
+          proxies.push(cloned);
+        });
+        continue;
       }
 
       proxies.push(p);
