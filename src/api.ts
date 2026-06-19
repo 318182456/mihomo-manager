@@ -25,6 +25,8 @@ export interface UrlEntry {
   akileServerId?: string;
   akileApiClient?: string;
   akileApiSecret?: string;
+  cfOptimize?: boolean;
+  cfOptimizeNum?: number;
 }
 
 export interface SubscriptionGroup {

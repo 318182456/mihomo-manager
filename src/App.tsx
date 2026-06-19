@@ -1317,6 +1317,49 @@ function SubscriptionsView() {
                       </div>
                     </div>
 
+                    {/* Cloudflare 优选 IP 配置 */}
+                    <div className="pt-2 border-t border-technical-border/20 space-y-2">
+                      <label className="block text-[10px] font-display font-bold text-technical-cyan uppercase tracking-widest">
+                        Cloudflare 优选 IP 配置 (自动克隆 CDN 节点到优选 IP)
+                      </label>
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                        <div className="flex items-center">
+                          <label className="flex items-center gap-2 text-[11px] text-technical-muted cursor-pointer select-none">
+                            <input
+                              type="checkbox"
+                              checked={source.cfOptimize ?? false}
+                              onChange={(e) => {
+                                setGlobalUrls(globalUrls.map(u => u.id === source.id ? { ...u, cfOptimize: e.target.checked } : u));
+                                handleUpdateSource(source.id, { cfOptimize: e.target.checked });
+                              }}
+                              className="bg-black/40 border border-technical-border rounded-sm text-technical-cyan focus:ring-0 outline-none w-3.5 h-3.5"
+                            />
+                            <span>启用优选 IP 优化</span>
+                          </label>
+                        </div>
+                        <div>
+                          <label className="block text-[9px] font-display text-technical-muted uppercase tracking-widest mb-1">优选 IP 节点数量</label>
+                          <input
+                            type="number"
+                            min={1}
+                            max={50}
+                            disabled={!source.cfOptimize}
+                            value={source.cfOptimizeNum ?? ''}
+                            onChange={(e) => {
+                              const val = e.target.value ? parseInt(e.target.value, 10) : undefined;
+                              setGlobalUrls(globalUrls.map(u => u.id === source.id ? { ...u, cfOptimizeNum: val } : u));
+                            }}
+                            onBlur={(e) => {
+                              const val = e.target.value ? parseInt(e.target.value, 10) : undefined;
+                              handleUpdateSource(source.id, { cfOptimizeNum: val });
+                            }}
+                            placeholder="默认 5 (最大 50)"
+                            className="w-full bg-black/40 border border-technical-border rounded-sm px-2.5 py-1.5 font-mono text-xs text-gray-300 focus:outline-none focus:border-technical-cyan/50 disabled:opacity-40"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
                     <div className="flex items-center gap-3 pt-1">
                       <button
                         onClick={() => handleSourceRefresh(source.id)}
