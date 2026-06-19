@@ -1825,7 +1825,9 @@ async function fetchProxiesFromGroup(
         const hostDomain = p.servername || p.sni || originalServer;
 
         // 保留原节点
-        proxies.push(p);
+        if (!entry.cfOptimizeHideOriginal) {
+          proxies.push(p);
+        }
 
         // 获取优选列表 (根据优化模式判断)
         let targets: { ip: string; isp: string }[] = [];
