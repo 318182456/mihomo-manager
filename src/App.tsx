@@ -1206,8 +1206,8 @@ function SubscriptionsView() {
 
                     {/* Cache parameters */}
                     <div className="pt-2 border-t border-technical-border/20 space-y-2">
-                      <label className="block text-[10px] font-display font-bold text-technical-cyan uppercase tracking-widest">缓存刷新配置</label>
-                      <div className="grid grid-cols-3 gap-3">
+                      <label className="block text-[10px] font-display font-bold text-technical-cyan uppercase tracking-widest">缓存与解析配置</label>
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                         <div>
                           <label className="block text-[9px] font-display text-technical-muted uppercase tracking-widest mb-1">缓存过期时间 (分钟，默认5，0不过期，-1不缓存)</label>
                           <input
@@ -1227,6 +1227,20 @@ function SubscriptionsView() {
                             placeholder="如: 5 (0不过期, -1不缓存)"
                             className="w-full bg-black/40 border border-technical-border rounded-sm px-2.5 py-1.5 font-mono text-xs text-gray-300 focus:outline-none focus:border-technical-cyan/50"
                           />
+                        </div>
+                        <div className="flex items-end pb-2">
+                          <label className="flex items-center gap-2 text-[11px] text-technical-muted cursor-pointer select-none">
+                            <input
+                              type="checkbox"
+                              checked={source.simplifyNames ?? false}
+                              onChange={(e) => {
+                                setGlobalUrls(globalUrls.map(u => u.id === source.id ? { ...u, simplifyNames: e.target.checked } : u));
+                                handleUpdateSource(source.id, { simplifyNames: e.target.checked });
+                              }}
+                              className="bg-black/40 border border-technical-border rounded-sm text-technical-cyan focus:ring-0 outline-none w-3.5 h-3.5"
+                            />
+                            <span>简化节点名称 (移除 +WS/+TLS/+Reality)</span>
+                          </label>
                         </div>
                       </div>
                     </div>
@@ -1318,80 +1332,119 @@ function SubscriptionsView() {
                     </div>
 
                     {/* Cloudflare 优选 IP 配置 */}
-                    <div className="pt-2 border-t border-technical-border/20 space-y-2">
+                    <div className="pt-2 border-t border-technical-border/20 space-y-3">
                       <label className="block text-[10px] font-display font-bold text-technical-cyan uppercase tracking-widest">
                         Cloudflare 优选 IP 配置 (自动克隆 CDN 节点到优选 IP)
                       </label>
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                        <div className="flex items-center">
-                          <label className="flex items-center gap-2 text-[11px] text-technical-muted cursor-pointer select-none">
-                            <input
-                              type="checkbox"
-                              checked={source.cfOptimize ?? false}
-                              onChange={(e) => {
-                                setGlobalUrls(globalUrls.map(u => u.id === source.id ? { ...u, cfOptimize: e.target.checked } : u));
-                                handleUpdateSource(source.id, { cfOptimize: e.target.checked });
-                              }}
-                              className="bg-black/40 border border-technical-border rounded-sm text-technical-cyan focus:ring-0 outline-none w-3.5 h-3.5"
-                            />
-                            <span>启用优选 IP 优化</span>
-                          </label>
-                        </div>
-                        <div>
-                          <label className="block text-[9px] font-display text-technical-muted uppercase tracking-widest mb-1">优选 IP 节点数量</label>
+                      
+                      <div className="flex flex-col sm:flex-row sm:items-center gap-4 bg-black/20 p-3 rounded-sm border border-technical-border/30">
+                        <label className="flex items-center gap-2 text-[11px] text-technical-muted cursor-pointer select-none">
                           <input
-                            type="number"
-                            min={1}
-                            max={50}
-                            disabled={!source.cfOptimize}
-                            value={source.cfOptimizeNum ?? ''}
+                            type="checkbox"
+                            checked={source.cfOptimize ?? false}
                             onChange={(e) => {
-                              const val = e.target.value ? parseInt(e.target.value, 10) : undefined;
-                              setGlobalUrls(globalUrls.map(u => u.id === source.id ? { ...u, cfOptimizeNum: val } : u));
+                              setGlobalUrls(globalUrls.map(u => u.id === source.id ? { ...u, cfOptimize: e.target.checked } : u));
+                              handleUpdateSource(source.id, { cfOptimize: e.target.checked });
                             }}
-                            onBlur={(e) => {
-                              const val = e.target.value ? parseInt(e.target.value, 10) : undefined;
-                              handleUpdateSource(source.id, { cfOptimizeNum: val });
-                            }}
-                            placeholder="默认 5 (最大 50)"
-                            className="w-full bg-black/40 border border-technical-border rounded-sm px-2.5 py-1.5 font-mono text-xs text-gray-300 focus:outline-none focus:border-technical-cyan/50 disabled:opacity-40"
+                            className="bg-black/40 border border-technical-border rounded-sm text-technical-cyan focus:ring-0 outline-none w-3.5 h-3.5"
                           />
-                        </div>
-                        <div className="flex items-center">
-                          <label className={`flex items-center gap-2 text-[11px] text-technical-muted select-none ${source.cfOptimize ? 'cursor-pointer' : 'cursor-not-allowed'}`}>
-                            <input
-                              type="checkbox"
-                              disabled={!source.cfOptimize}
-                              checked={source.cfOptimizeOnlyCdn ?? false}
-                              onChange={(e) => {
-                                setGlobalUrls(globalUrls.map(u => u.id === source.id ? { ...u, cfOptimizeOnlyCdn: e.target.checked } : u));
-                                handleUpdateSource(source.id, { cfOptimizeOnlyCdn: e.target.checked });
-                              }}
-                              className="bg-black/40 border border-technical-border rounded-sm text-technical-cyan focus:ring-0 outline-none w-3.5 h-3.5 disabled:opacity-40"
-                            />
-                            <span>仅对名称包含 "cdn" 的节点优化</span>
-                          </label>
-                        </div>
-                      </div>
-                      {/* 自定义优选域名/IP */}
-                      <div className="pt-2">
-                        <label className="block text-[9px] font-display text-technical-muted uppercase tracking-widest mb-1">
-                          自定义优选域名/IP（以逗号/空格分隔，选填。留空则默认使用系统优选测速 API）
+                          <span className={source.cfOptimize ? 'text-technical-cyan font-bold' : ''}>启用优选 IP 优化</span>
                         </label>
-                        <input
-                          type="text"
-                          disabled={!source.cfOptimize}
-                          value={source.cfOptimizeDomain ?? ''}
-                          onChange={(e) => {
-                            setGlobalUrls(globalUrls.map(u => u.id === source.id ? { ...u, cfOptimizeDomain: e.target.value } : u));
-                          }}
-                          onBlur={(e) => {
-                            handleUpdateSource(source.id, { cfOptimizeDomain: e.target.value.trim() || undefined });
-                          }}
-                          placeholder="如: 318182456.cf.090227.xyz"
-                          className="w-full bg-black/40 border border-technical-border rounded-sm px-2.5 py-1.5 font-mono text-xs text-gray-300 focus:outline-none focus:border-technical-cyan/50 disabled:opacity-40"
-                        />
+
+                        <label className={`flex items-center gap-2 text-[11px] text-technical-muted select-none ${source.cfOptimize ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'}`}>
+                          <input
+                            type="checkbox"
+                            disabled={!source.cfOptimize}
+                            checked={source.cfOptimizeOnlyCdn ?? false}
+                            onChange={(e) => {
+                              setGlobalUrls(globalUrls.map(u => u.id === source.id ? { ...u, cfOptimizeOnlyCdn: e.target.checked } : u));
+                              handleUpdateSource(source.id, { cfOptimizeOnlyCdn: e.target.checked });
+                            }}
+                            className="bg-black/40 border border-technical-border rounded-sm text-technical-cyan focus:ring-0 outline-none w-3.5 h-3.5"
+                          />
+                          <span>仅对名称包含 "cdn" 的节点优化</span>
+                        </label>
                       </div>
+
+                      {source.cfOptimize && (
+                        <div className="space-y-3 p-3 bg-zinc-950 border border-technical-border/40 rounded-sm animate-fadeIn">
+                          {/* Segmented Control */}
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] font-display text-technical-muted uppercase tracking-widest shrink-0">优化模式:</span>
+                            <div className="flex gap-1 bg-black/40 p-0.5 border border-technical-border rounded-sm shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setGlobalUrls(globalUrls.map(u => u.id === source.id ? { ...u, cfOptimizeType: 'api' } : u));
+                                  handleUpdateSource(source.id, { cfOptimizeType: 'api' });
+                                }}
+                                className={`px-3 py-1 text-[11px] rounded-sm transition-all ${
+                                  (source.cfOptimizeType ?? 'api') === 'api'
+                                    ? 'bg-technical-cyan text-black font-bold'
+                                    : 'text-technical-muted hover:text-white'
+                                }`}
+                              >
+                                系统测速 IP
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setGlobalUrls(globalUrls.map(u => u.id === source.id ? { ...u, cfOptimizeType: 'custom' } : u));
+                                  handleUpdateSource(source.id, { cfOptimizeType: 'custom' });
+                                }}
+                                className={`px-3 py-1 text-[11px] rounded-sm transition-all ${
+                                  source.cfOptimizeType === 'custom'
+                                    ? 'bg-technical-cyan text-black font-bold'
+                                    : 'text-technical-muted hover:text-white'
+                                }`}
+                              >
+                                自定义域名 / IP
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Dynamic Inputs */}
+                          {(source.cfOptimizeType ?? 'api') === 'api' ? (
+                            <div className="animate-fadeIn">
+                              <label className="block text-[9px] font-display text-technical-muted uppercase tracking-widest mb-1">优选 IP 节点数量</label>
+                              <input
+                                type="number"
+                                min={1}
+                                max={50}
+                                value={source.cfOptimizeNum ?? ''}
+                                onChange={(e) => {
+                                  const val = e.target.value ? parseInt(e.target.value, 10) : undefined;
+                                  setGlobalUrls(globalUrls.map(u => u.id === source.id ? { ...u, cfOptimizeNum: val } : u));
+                                }}
+                                onBlur={(e) => {
+                                  const val = e.target.value ? parseInt(e.target.value, 10) : undefined;
+                                  handleUpdateSource(source.id, { cfOptimizeNum: val });
+                                }}
+                                placeholder="默认 5 (最大 50)"
+                                className="w-48 bg-black/40 border border-technical-border rounded-sm px-2.5 py-1.5 font-mono text-xs text-gray-300 focus:outline-none focus:border-technical-cyan/50"
+                              />
+                            </div>
+                          ) : (
+                            <div className="animate-fadeIn">
+                              <label className="block text-[9px] font-display text-technical-muted uppercase tracking-widest mb-1">
+                                自定义优选域名/IP（以逗号/空格分隔，支持填写如 318182456.cf.090227.xyz 或 www.visa.com）
+                              </label>
+                              <input
+                                type="text"
+                                value={source.cfOptimizeDomain ?? ''}
+                                onChange={(e) => {
+                                  setGlobalUrls(globalUrls.map(u => u.id === source.id ? { ...u, cfOptimizeDomain: e.target.value } : u));
+                                }}
+                                onBlur={(e) => {
+                                  handleUpdateSource(source.id, { cfOptimizeDomain: e.target.value.trim() || undefined });
+                                }}
+                                placeholder="输入域名或 IP 列表，如: 318182456.cf.090227.xyz"
+                                className="w-full bg-black/40 border border-technical-border rounded-sm px-2.5 py-1.5 font-mono text-xs text-gray-300 focus:outline-none focus:border-technical-cyan/50"
+                              />
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
 
                     <div className="flex items-center gap-3 pt-1">

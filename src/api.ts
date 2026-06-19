@@ -29,6 +29,8 @@ export interface UrlEntry {
   cfOptimizeNum?: number;
   cfOptimizeOnlyCdn?: boolean;
   cfOptimizeDomain?: string;
+  cfOptimizeType?: 'api' | 'custom';
+  simplifyNames?: boolean;
 }
 
 export interface SubscriptionGroup {

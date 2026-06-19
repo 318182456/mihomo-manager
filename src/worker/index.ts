@@ -185,6 +185,8 @@ export interface UrlEntry {
   cfOptimizeNum?: number;
   cfOptimizeOnlyCdn?: boolean;
   cfOptimizeDomain?: string;
+  cfOptimizeType?: 'api' | 'custom';
+  simplifyNames?: boolean;
 }
 
 export interface SubscriptionGroup {
@@ -1720,6 +1722,16 @@ function proxyToURI(p: any): string {
   return '';
 }
 
+function simplifyNodeName(name: string): string {
+  if (!name) return name;
+  let s = name;
+  s = s.replace(/\s*\+\s*Reality/gi, '');
+  s = s.replace(/\s*\+\s*WS/gi, '');
+  s = s.replace(/\s*\+\s*TLS/gi, '');
+  s = s.replace(/\s+/g, ' ').trim();
+  return s;
+}
+
 async function fetchProxiesFromGroup(
   group: SubscriptionGroup,
   env: Env,
@@ -1765,6 +1777,9 @@ async function fetchProxiesFromGroup(
     const entry = group.urls[i];
     for (const p of parsed) {
       if (!p || !p.name) continue;
+      if (entry.simplifyNames) {
+        p.name = simplifyNodeName(p.name);
+      }
       if (filterRe && !filterRe.test(p.name)) continue;
       
       // 兼容并规范化 Reality 结构（必须为 reality-opts 嵌套，且使用连字符 -）
@@ -1812,9 +1827,10 @@ async function fetchProxiesFromGroup(
         // 保留原节点
         proxies.push(p);
 
-        // 获取优选列表 (如果是自定义域名/IP，优先使用)
+        // 获取优选列表 (根据优化模式判断)
         let targets: { ip: string; isp: string }[] = [];
-        if (entry.cfOptimizeDomain) {
+        const useCustom = entry.cfOptimizeType === 'custom' || (!entry.cfOptimizeType && entry.cfOptimizeDomain);
+        if (useCustom && entry.cfOptimizeDomain) {
           const customList = entry.cfOptimizeDomain.split(/[,，\s]+/).map(x => x.trim()).filter(Boolean);
           targets = customList.map((val, idx) => ({
             ip: val,
