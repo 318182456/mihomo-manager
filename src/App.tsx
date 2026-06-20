@@ -482,7 +482,7 @@ function SubscriptionsView() {
   useEffect(() => { loadData(); }, []);
   const handleAddGroup = async () => {
     try {
-      await api.createSubscription({ title: '新建订阅组', enabled: true, filter: '', onlyCdnAtNight: false, urlIds: [], urls: [] });
+      await api.createSubscription({ title: '新建订阅组', enabled: true, filter: '', urlIds: [], urls: [] });
       loadData();
     } catch {
       alert('添加失败');
@@ -673,15 +673,6 @@ function SubscriptionsView() {
                 </div>
                 <div className="flex items-center gap-4 shrink-0 ml-4">
                   <button className="text-red-500/50 hover:text-red-500" onClick={() => handleDeleteGroup(group.id)}><Trash2 size={16} /></button>
-                  <label className="flex items-center gap-1.5 cursor-pointer select-none">
-                    <input 
-                      type="checkbox" 
-                      checked={group.onlyCdnAtNight ?? false} 
-                      onChange={(e) => handleUpdateGroup(group.id, { onlyCdnAtNight: e.target.checked })}
-                      className="rounded border-zinc-700 bg-black text-technical-cyan focus:ring-0 focus:ring-offset-0 w-3.5 h-3.5 cursor-pointer"
-                    />
-                    <span className="text-[10px] font-display font-bold uppercase tracking-widest text-technical-muted hover:text-gray-300">晚上只显示 CDN</span>
-                  </label>
                   <div className="font-mono text-[10px] text-technical-muted bg-black border border-technical-border px-2 py-1 rounded">已选 {group.urlIds.length} 个源</div>
                   <label className="relative inline-flex items-center cursor-pointer">
                     <input type="checkbox" checked={group.enabled} onChange={(e) => handleUpdateGroup(group.id, { enabled: e.target.checked })} className="sr-only peer" />
@@ -1248,6 +1239,20 @@ function SubscriptionsView() {
                               className="bg-black/40 border border-technical-border rounded-sm text-technical-cyan focus:ring-0 outline-none w-3.5 h-3.5"
                             />
                             <span>简化节点名称 (移除 +WS/+TLS/+Reality)</span>
+                          </label>
+                        </div>
+                        <div className="flex items-end pb-2">
+                          <label className="flex items-center gap-2 text-[11px] text-technical-muted cursor-pointer select-none">
+                            <input
+                              type="checkbox"
+                              checked={source.onlyCdnAtNight ?? false}
+                              onChange={(e) => {
+                                setGlobalUrls(globalUrls.map(u => u.id === source.id ? { ...u, onlyCdnAtNight: e.target.checked } : u));
+                                handleUpdateSource(source.id, { onlyCdnAtNight: e.target.checked });
+                              }}
+                              className="bg-black/40 border border-technical-border rounded-sm text-technical-cyan focus:ring-0 outline-none w-3.5 h-3.5"
+                            />
+                            <span className={source.onlyCdnAtNight ? 'text-technical-cyan font-bold' : ''}>晚上只显示 CDN</span>
                           </label>
                         </div>
                       </div>

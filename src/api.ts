@@ -32,11 +32,11 @@ export interface UrlEntry {
   cfOptimizeDomain?: string;
   cfOptimizeType?: 'api' | 'custom';
   simplifyNames?: boolean;
+  onlyCdnAtNight?: boolean;
 }
 
 export interface SubscriptionGroup {
   id: string; title: string; enabled: boolean; filter: string;
-  onlyCdnAtNight?: boolean;
   urlIds: string[];
   urls: UrlEntry[];
   updatedAt: string;
