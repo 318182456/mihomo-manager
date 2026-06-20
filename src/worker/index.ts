@@ -1298,7 +1298,7 @@ async function updateSubscriptionCache(
   // 辅助函数：拉取单个 URL
   const fetchOne = async (url: string) => {
     const controller = new AbortController();
-    const id = setTimeout(() => controller.abort(), 15000); // 15秒超时保护
+    const id = setTimeout(() => controller.abort(), 6000); // 6秒超时保护
     try {
       const response = await fetch(url, {
         signal: controller.signal,
@@ -1345,7 +1345,7 @@ async function updateSubscriptionCache(
         const apiClient = cleanVal(entry.akileApiClient);
         const apiSecret = cleanVal(entry.akileApiSecret);
 
-        const akileRes = await fetch('https://api.akile.ai/api/v1/api/server/GetServerList', {
+        const akileRes = await fetchWithTimeout('https://api.akile.ai/api/v1/api/server/GetServerList', {
           method: 'POST',
           headers: {
             'accept': 'application/json',
@@ -1356,7 +1356,8 @@ async function updateSubscriptionCache(
           body: JSON.stringify({
             page_num: 1,
             page_size: 100
-          })
+          }),
+          timeout: 3000
         });
         if (akileRes.ok) {
           const akileJson = await akileRes.json() as any;
