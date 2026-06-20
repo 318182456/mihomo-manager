@@ -36,6 +36,7 @@ export interface UrlEntry {
 
 export interface SubscriptionGroup {
   id: string; title: string; enabled: boolean; filter: string;
+  onlyCdnAtNight?: boolean;
   urlIds: string[];
   urls: UrlEntry[];
   updatedAt: string;

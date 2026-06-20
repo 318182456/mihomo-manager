@@ -191,6 +191,7 @@ export interface UrlEntry {
 
 export interface SubscriptionGroup {
   id: string; title: string; enabled: boolean; filter: string;
+  onlyCdnAtNight?: boolean;
   urlIds: string[];
   urls: UrlEntry[];
   updatedAt: string;
@@ -957,6 +958,7 @@ async function handleSubscriptions(req: Request, kv: KVNamespace, method: string
       title: body.title,
       enabled: body.enabled,
       filter: body.filter,
+      onlyCdnAtNight: body.onlyCdnAtNight ?? false,
       urlIds,
       id: uuid(),
       updatedAt: new Date().toISOString()
@@ -976,6 +978,7 @@ async function handleSubscriptions(req: Request, kv: KVNamespace, method: string
       title: body.title !== undefined ? body.title : rawList[idx].title,
       enabled: body.enabled !== undefined ? body.enabled : rawList[idx].enabled,
       filter: body.filter !== undefined ? body.filter : rawList[idx].filter,
+      onlyCdnAtNight: body.onlyCdnAtNight !== undefined ? body.onlyCdnAtNight : rawList[idx].onlyCdnAtNight,
       urlIds,
       updatedAt: new Date().toISOString()
     };
@@ -1740,6 +1743,15 @@ async function fetchProxiesFromGroup(
   const filter = compileGroupFilter(group.filter);
   const filterRe = filter ? new RegExp(filter) : null;
 
+  // 判断当前是否是 UTC+8 晚间 (18:00 - 06:00)
+  let isNight = false;
+  if (group.onlyCdnAtNight) {
+    const gmt8Hour = new Date(Date.now() + 8 * 3600 * 1000).getUTCHours();
+    if (gmt8Hour >= 18 || gmt8Hour < 6) {
+      isNight = true;
+    }
+  }
+
   const needCfOptimize = group.urls.some(u => u.cfOptimize);
   let cfIps: OptimizedIP[] = [];
   if (needCfOptimize) {
@@ -1818,7 +1830,9 @@ async function fetchProxiesFromGroup(
         (p.tls || p.security === 'tls')
       );
 
-
+      if (isNight && !isCdn) {
+        continue;
+      }
 
       if (entry.cfOptimize && isCdn && (cfIps.length > 0 || entry.cfOptimizeDomain)) {
         const originalServer = p.server;
