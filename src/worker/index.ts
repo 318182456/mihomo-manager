@@ -184,6 +184,7 @@ export interface UrlEntry {
   cfOptimize?: boolean;
   cfOptimizeNum?: number;
   cfOptimizeOnlyCdn?: boolean;
+  cfOptimizeHideOriginal?: boolean;
   cfOptimizeDomain?: string;
   cfOptimizeType?: 'api' | 'custom';
   simplifyNames?: boolean;
