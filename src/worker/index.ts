@@ -181,6 +181,13 @@ export interface UrlEntry {
   akileServerId?: string;
   akileApiClient?: string;
   akileApiSecret?: string;
+  cfOptimize?: boolean;
+  cfOptimizeNum?: number;
+  cfOptimizeOnlyCdn?: boolean;
+  cfOptimizeDomain?: string;
+  cfOptimizeType?: 'api' | 'custom';
+  simplifyNames?: boolean;
+  onlyCdnAtNight?: boolean;
 }
 
 export interface SubscriptionGroup {
@@ -1121,6 +1128,102 @@ async function handleDashboard(env: Env): Promise<Response> {
   });
 }
 
+interface OptimizedIP {
+  ip: string;
+  isp: string;
+}
+
+interface OptimizedIPsCache {
+  updatedAt: number;
+  ips: OptimizedIP[];
+}
+
+async function fetchCloudflareOptimizedIPs(env: Env): Promise<OptimizedIP[]> {
+  const cacheKey = 'cloudflare_optimized_ips';
+  try {
+    const cached = await env.KV.get(cacheKey);
+    if (cached) {
+      const parsed = JSON.parse(cached) as OptimizedIPsCache;
+      if (Date.now() - parsed.updatedAt < 600 * 1000) {
+        return parsed.ips;
+      }
+    }
+  } catch (e) {
+    console.error('[CF IP] 读取缓存失败:', e);
+  }
+
+  try {
+    console.log('[CF IP] 开始获取优选 IP...');
+    const res = await fetch('https://api.uouin.com/cloudflare.html', {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+      }
+    });
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status}`);
+    }
+    const html = await res.text();
+
+    const trRegex = /<tr[^>]*>([\s\S]*?)<\/tr>/g;
+    const ipRegex = /href="http:\/\/\[?([a-fA-F0-9:.]+)(?:\])?\/cdn-cgi\/trace"/;
+    const operatorRegex = /<td>\s*(电信|联通|移动|IPV6)\s*<\/td>/i;
+
+    let match;
+    const teleIPs: string[] = [];
+    const unicIPs: string[] = [];
+    const mobiIPs: string[] = [];
+    const ipv6IPs: string[] = [];
+    const otherIPs: string[] = [];
+
+    while ((match = trRegex.exec(html)) !== null) {
+      const trContent = match[1];
+      const ipMatch = ipRegex.exec(trContent);
+      if (ipMatch) {
+        const ip = ipMatch[1];
+        const opMatch = operatorRegex.exec(trContent);
+        const op = opMatch ? opMatch[1].trim() : '';
+        if (op === '电信') teleIPs.push(ip);
+        else if (op === '联通') unicIPs.push(ip);
+        else if (op === '移动') mobiIPs.push(ip);
+        else if (op === 'IPV6') ipv6IPs.push(ip);
+        else otherIPs.push(ip);
+      }
+    }
+
+    const interleavedIps: OptimizedIP[] = [];
+    const maxLength = Math.max(teleIPs.length, unicIPs.length, mobiIPs.length);
+    for (let i = 0; i < maxLength; i++) {
+      if (i < teleIPs.length) interleavedIps.push({ ip: teleIPs[i], isp: '电信' });
+      if (i < unicIPs.length) interleavedIps.push({ ip: unicIPs[i], isp: '联通' });
+      if (i < mobiIPs.length) interleavedIps.push({ ip: mobiIPs[i], isp: '移动' });
+    }
+
+    ipv6IPs.forEach(ip => interleavedIps.push({ ip, isp: 'IPv6' }));
+    otherIPs.forEach(ip => interleavedIps.push({ ip, isp: '其他' }));
+
+    if (interleavedIps.length > 0) {
+      await env.KV.put(cacheKey, JSON.stringify({
+        updatedAt: Date.now(),
+        ips: interleavedIps
+      }));
+      console.log(`[CF IP] 成功获取并缓存了 ${interleavedIps.length} 个 IP (电信:${teleIPs.length}, 联通:${unicIPs.length}, 移动:${mobiIPs.length})`);
+      return interleavedIps;
+    }
+  } catch (e) {
+    console.error('[CF IP] 获取优选 IP 异常:', e);
+  }
+
+  try {
+    const cached = await env.KV.get(cacheKey);
+    if (cached) {
+      const parsed = JSON.parse(cached) as OptimizedIPsCache;
+      return parsed.ips;
+    }
+  } catch {}
+
+  return [];
+}
+
 interface SubscriptionCache {
   lastCacheUpdate: number;
   data: string;
@@ -1195,7 +1298,7 @@ async function updateSubscriptionCache(
   // 辅助函数：拉取单个 URL
   const fetchOne = async (url: string) => {
     const controller = new AbortController();
-    const id = setTimeout(() => controller.abort(), 15000); // 15秒超时保护
+    const id = setTimeout(() => controller.abort(), 6000); // 6秒超时保护
     try {
       const response = await fetch(url, {
         signal: controller.signal,
@@ -1242,7 +1345,7 @@ async function updateSubscriptionCache(
         const apiClient = cleanVal(entry.akileApiClient);
         const apiSecret = cleanVal(entry.akileApiSecret);
 
-        const akileRes = await fetch('https://api.akile.ai/api/v1/api/server/GetServerList', {
+        const akileRes = await fetchWithTimeout('https://api.akile.ai/api/v1/api/server/GetServerList', {
           method: 'POST',
           headers: {
             'accept': 'application/json',
@@ -1253,7 +1356,8 @@ async function updateSubscriptionCache(
           body: JSON.stringify({
             page_num: 1,
             page_size: 100
-          })
+          }),
+          timeout: 3000
         });
         if (akileRes.ok) {
           const akileJson = await akileRes.json() as any;
@@ -1620,6 +1724,16 @@ function proxyToURI(p: any): string {
   return '';
 }
 
+function simplifyNodeName(name: string): string {
+  if (!name) return name;
+  let s = name;
+  s = s.replace(/\s*\+\s*Reality/gi, '');
+  s = s.replace(/\s*\+\s*WS/gi, '');
+  s = s.replace(/\s*\+\s*TLS/gi, '');
+  s = s.replace(/\s+/g, ' ').trim();
+  return s;
+}
+
 async function fetchProxiesFromGroup(
   group: SubscriptionGroup,
   env: Env,
@@ -1627,6 +1741,12 @@ async function fetchProxiesFromGroup(
 ): Promise<{ proxies: any[]; rawYamls: string[] }> {
   const filter = compileGroupFilter(group.filter);
   const filterRe = filter ? new RegExp(filter) : null;
+
+  const needCfOptimize = group.urls.some(u => u.cfOptimize);
+  let cfIps: OptimizedIP[] = [];
+  if (needCfOptimize) {
+    cfIps = await fetchCloudflareOptimizedIPs(env);
+  }
 
   const results = await Promise.allSettled(
     group.urls.map(entry =>
@@ -1657,8 +1777,20 @@ async function fetchProxiesFromGroup(
     }
 
     const entry = group.urls[i];
+    // 判断当前是否是 UTC+8 晚间 (18:00 - 06:00)
+    let isNight = false;
+    if (entry && entry.onlyCdnAtNight) {
+      const gmt8Hour = new Date(Date.now() + 8 * 3600 * 1000).getUTCHours();
+      if (gmt8Hour >= 18 || gmt8Hour < 6) {
+        isNight = true;
+      }
+    }
+
     for (const p of parsed) {
       if (!p || !p.name) continue;
+      if (entry.simplifyNames) {
+        p.name = simplifyNodeName(p.name);
+      }
       if (filterRe && !filterRe.test(p.name)) continue;
       
       // 兼容并规范化 Reality 结构（必须为 reality-opts 嵌套，且使用连字符 -）
@@ -1689,6 +1821,75 @@ async function fetchProxiesFromGroup(
         if (entry.hysteria2Down) p.down = entry.hysteria2Down;
         if (entry.hysteria2Mtu) p.mtu = entry.hysteria2Mtu;
       }
+
+      const isCdn = p.name.toLowerCase().includes('cdn') || (
+        !entry.cfOptimizeOnlyCdn &&
+        (p.type === 'vmess' || p.type === 'vless' || p.type === 'trojan') && 
+        p.network === 'ws' && 
+        (p.tls || p.security === 'tls')
+      );
+
+      if (isNight && !isCdn) {
+        continue;
+      }
+
+      if (entry.cfOptimize && isCdn && (cfIps.length > 0 || entry.cfOptimizeDomain)) {
+        const originalServer = p.server;
+        const hostDomain = p.servername || p.sni || originalServer;
+
+        // 保留原节点
+        if (!entry.cfOptimizeHideOriginal) {
+          proxies.push(p);
+        }
+
+        // 获取优选列表 (根据优化模式判断)
+        let targets: { ip: string; isp: string }[] = [];
+        const useCustom = entry.cfOptimizeType === 'custom' || (!entry.cfOptimizeType && entry.cfOptimizeDomain);
+        if (useCustom && entry.cfOptimizeDomain) {
+          const customList = entry.cfOptimizeDomain.split(/[,，\s]+/).map(x => x.trim()).filter(Boolean);
+          targets = customList.map((val, idx) => ({
+            ip: val,
+            isp: customList.length === 1 ? '优选' : `优选 ${idx + 1}`
+          }));
+        } else {
+          const limit = entry.cfOptimizeNum || 5;
+          const optimizedIps = cfIps.slice(0, limit);
+          const ispCounts: Record<string, number> = {};
+          targets = optimizedIps.map(opt => {
+            if (!ispCounts[opt.isp]) ispCounts[opt.isp] = 0;
+            ispCounts[opt.isp]++;
+            return {
+              ip: opt.ip,
+              isp: `${opt.isp} ${ispCounts[opt.isp]}`
+            };
+          });
+        }
+
+        // 克隆出优选 IP 节点
+        targets.forEach((opt) => {
+          const cloned = JSON.parse(JSON.stringify(p));
+          cloned.name = `${p.name} - ${opt.isp}`;
+          cloned.server = opt.ip;
+          cloned.port = 443;
+
+          // 保持 SNI
+          if (!cloned.sni) cloned.sni = hostDomain;
+          if (!cloned.servername) cloned.servername = hostDomain;
+
+          // 对于 ws 传输，保持 Host
+          if (cloned.network === 'ws' || cloned.type === 'vmess') {
+            if (!cloned['ws-opts']) cloned['ws-opts'] = { path: '/' };
+            if (!cloned['ws-opts'].headers) cloned['ws-opts'].headers = {};
+            if (!cloned['ws-opts'].headers.Host && !cloned['ws-opts'].headers.host) {
+              cloned['ws-opts'].headers.Host = hostDomain;
+            }
+          }
+
+          proxies.push(cloned);
+        });
+        continue;
+      }
+
       proxies.push(p);
     }
   }
