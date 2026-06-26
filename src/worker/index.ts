@@ -203,6 +203,7 @@ export interface Template {
 export interface GeneratedLink {
   id: string; name: string; group: string; templateId: string;
   subscriptionGroupId: string; token: string; expiresAt: string | null; createdAt: string;
+  proxyUpdateInterval?: number;
 }
 
 // ---------- 通用工具 ----------
@@ -1104,6 +1105,22 @@ async function handleLinks(req: Request, kv: KVNamespace, method: string, id: st
     await kv.put('links', JSON.stringify([...list, link]));
     return ok(link, 201);
   }
+  if (method === 'PUT' && id) {
+    const body = await req.json<Partial<GeneratedLink>>();
+    const idx = list.findIndex(l => l.id === id);
+    if (idx === -1) return err('Link Not Found', 404);
+    list[idx] = { 
+      ...list[idx], 
+      name: body.name ?? list[idx].name,
+      group: body.group ?? list[idx].group,
+      templateId: body.templateId ?? list[idx].templateId,
+      subscriptionGroupId: body.subscriptionGroupId ?? list[idx].subscriptionGroupId,
+      expiresAt: body.expiresAt !== undefined ? body.expiresAt : list[idx].expiresAt,
+      proxyUpdateInterval: body.proxyUpdateInterval !== undefined ? body.proxyUpdateInterval : list[idx].proxyUpdateInterval
+    };
+    await kv.put('links', JSON.stringify(list));
+    return ok(list[idx]);
+  }
   if (method === 'DELETE' && id) {
     await kv.put('links', JSON.stringify(list.filter(l=>l.id!==id)));
     return ok({ ok: true });
@@ -1908,6 +1925,19 @@ async function handleSubFetch(pathname: string, env: Env, request: Request, ctx:
   if (!link) return err('无效的订阅令牌', 404);
   if (link.expiresAt && new Date(link.expiresAt) < new Date()) return err('订阅链接已过期', 410);
 
+  const urlObj = new URL(request.url);
+  const queryInterval = urlObj.searchParams.get('proxy_interval') || urlObj.searchParams.get('interval');
+  let parsedQueryInterval = queryInterval ? parseInt(queryInterval, 10) : NaN;
+  if (!isNaN(parsedQueryInterval) && parsedQueryInterval > 100) {
+    // 兼容可能传入的秒数，转换为小时
+    parsedQueryInterval = Math.round(parsedQueryInterval / 3600);
+  }
+  let proxyUpdateInterval = !isNaN(parsedQueryInterval) ? parsedQueryInterval : link.proxyUpdateInterval;
+  if (proxyUpdateInterval && proxyUpdateInterval > 100) {
+    // 兼容可能存留的历史秒数
+    proxyUpdateInterval = Math.round(proxyUpdateInterval / 3600);
+  }
+
   const subRaw = await env.KV.get('subscriptions');
   const groups: any[] = subRaw ? JSON.parse(subRaw) : [];
   const rawGroup = groups.find(g=>g.id===link.subscriptionGroupId);
@@ -1966,15 +1996,16 @@ async function handleSubFetch(pathname: string, env: Env, request: Request, ctx:
         const base = jsyaml.load(rawYamls[0]) as any;
         if (base && Array.isArray(base.proxies)) {
           base.proxies = proxies;
-          return subResponse(jsyaml.dump(base, { lineWidth: -1 }), link.name, userInfo);
+          return subResponse(jsyaml.dump(base, { lineWidth: -1 }), link.name, userInfo, false, proxyUpdateInterval);
         }
       } catch { /* 失败回退 */ }
     }
-    return subResponse(rawYamls.join('\n'), link.name, userInfo);
+    return subResponse(rawYamls.join('\n'), link.name, userInfo, false, proxyUpdateInterval);
   }
 
-  const output = await renderTemplate(tpl.content, group, proxies, env, request.url);
-  return subResponse(output, link.name, userInfo);
+  const intervalInSeconds = proxyUpdateInterval ? proxyUpdateInterval * 3600 : undefined;
+  const output = await renderTemplate(tpl.content, group, proxies, env, request.url, intervalInSeconds);
+  return subResponse(output, link.name, userInfo, false, proxyUpdateInterval);
 }
 
 /**
@@ -2001,7 +2032,7 @@ async function handleSubFetch(pathname: string, env: Env, request: Request, ctx:
  * 4. 包含其他模板：
  *    {{INCLUDE: 模板名称}} → 会被替换为对应的子模板内容
  */
-async function renderTemplate(template: string, group: SubscriptionGroup, filteredProxies: any[], env: Env, requestUrl?: string): Promise<string> {
+async function renderTemplate(template: string, group: SubscriptionGroup, filteredProxies: any[], env: Env, requestUrl?: string, proxyUpdateInterval?: number): Promise<string> {
   let output = template;
   const subUrlBase = requestUrl ? requestUrl.split('?')[0] : '';
 
@@ -2029,12 +2060,16 @@ async function renderTemplate(template: string, group: SubscriptionGroup, filter
     const providerLines = group.urls.map((entry, i) => {
       const name = entry.name ?? `p${i + 1}`;
       const providerUrl = subUrlBase ? `${subUrlBase}?provider=${encodeURIComponent(name)}` : entry.url;
-      return [
+      const lines = [
         `  ${name}:`,
         `    url: "${providerUrl}"`,
         `    path: "./providers/${name}.yaml"`,
         `    <<: *p`,
-      ].join('\n');
+      ];
+      if (proxyUpdateInterval && proxyUpdateInterval > 0) {
+        lines.push(`    interval: ${proxyUpdateInterval}`);
+      }
+      return lines.join('\n');
     }).join('\n');
 
     output = output
@@ -2212,21 +2247,27 @@ async function renderTemplate(template: string, group: SubscriptionGroup, filter
     return `[${cleaned}]`;
   });
 
+  if (proxyUpdateInterval && proxyUpdateInterval > 0) {
+    output = output.replace(/interval:\s*86400/g, `interval: ${proxyUpdateInterval}`);
+  }
+
   return output;
 }
 
-function subResponse(content: string, name: string, userInfo: string, isNodes = false): Response {
+function subResponse(content: string, name: string, userInfo: string, isNodes = false, updateIntervalHours?: number): Response {
   const encodedName = encodeURIComponent(name);
   const ext = isNodes ? 'txt' : 'yaml';
   const contentType = isNodes ? 'text/plain' : 'text/yaml';
-  return new Response(content, {
-    headers: {
-      'Content-Type': `${contentType}; charset=utf-8`,
-      'Content-Disposition': `attachment; filename="${encodedName}.${ext}"; filename*=utf-8''${encodedName}.${ext}`,
-      'Subscription-Userinfo': userInfo,
-      ...CORS,
-    },
-  });
+  const headers: any = {
+    'Content-Type': `${contentType}; charset=utf-8`,
+    'Content-Disposition': `attachment; filename="${encodedName}.${ext}"; filename*=utf-8''${encodedName}.${ext}`,
+    'Subscription-Userinfo': userInfo,
+    ...CORS,
+  };
+  if (updateIntervalHours && updateIntervalHours > 0) {
+    headers['profile-update-interval'] = String(updateIntervalHours);
+  }
+  return new Response(content, { headers });
 }
 
 /**

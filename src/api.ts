@@ -47,6 +47,7 @@ export interface Template {
 export interface GeneratedLink {
   id: string; name: string; group: string; templateId: string;
   subscriptionGroupId: string; token: string; expiresAt: string | null; createdAt: string;
+  proxyUpdateInterval?: number;
 }
 export interface DashboardStats {
   activeSubscriptions: number; totalSubscriptions: number;
@@ -192,6 +193,8 @@ export const deleteTemplate = (id: string) =>
 export const getLinks = () => apiFetch<GeneratedLink[]>('/api/links');
 export const createLink = (d: Omit<GeneratedLink,'id'|'token'|'createdAt'>) =>
   apiFetch<GeneratedLink>('/api/links', { method:'POST', body: JSON.stringify(d) });
+export const updateLink = (id: string, d: Partial<GeneratedLink>) =>
+  apiFetch<GeneratedLink>(`/api/links/${id}`, { method:'PUT', body: JSON.stringify(d) });
 export const deleteLink = (id: string) =>
   apiFetch(`/api/links/${id}`, { method:'DELETE' });
 

@@ -1744,10 +1744,12 @@ function GeneratedLinksView() {
 
   // Form state
   const [showForm, setShowForm] = useState(false);
+  const [editingLinkId, setEditingLinkId] = useState<string | null>(null);
   const [formName, setFormName] = useState('');
   const [formGroup, setFormGroup] = useState('');
   const [formSubGroupId, setFormSubGroupId] = useState('');
   const [formTplId, setFormTplId] = useState('');
+  const [formProxyUpdateInterval, setFormProxyUpdateInterval] = useState<number>(24);
 
   const loadData = async () => {
     try {
@@ -1770,23 +1772,56 @@ function GeneratedLinksView() {
 
   useEffect(() => { loadData(); }, []);
 
-  const handleCreate = async (e: FormEvent) => {
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     if (!formName || !formSubGroupId || !formTplId) return alert('请完整填写');
     try {
-      await api.createLink({
-        name: formName,
-        group: formGroup || 'Default',
-        subscriptionGroupId: formSubGroupId,
-        templateId: formTplId,
-        expiresAt: null // 暂不支持设置过期
-      });
+      if (editingLinkId) {
+        await api.updateLink(editingLinkId, {
+          name: formName,
+          group: formGroup || 'Default',
+          subscriptionGroupId: formSubGroupId,
+          templateId: formTplId,
+          proxyUpdateInterval: formProxyUpdateInterval
+        });
+      } else {
+        await api.createLink({
+          name: formName,
+          group: formGroup || 'Default',
+          subscriptionGroupId: formSubGroupId,
+          templateId: formTplId,
+          expiresAt: null, // 暂不支持设置过期
+          proxyUpdateInterval: formProxyUpdateInterval
+        });
+      }
       setShowForm(false);
+      setEditingLinkId(null);
       setFormName('');
+      setFormGroup('');
+      setFormProxyUpdateInterval(24);
       loadData();
     } catch (e) {
-      alert('生成失败');
+      alert(editingLinkId ? '修改失败' : '生成失败');
     }
+  };
+
+  const handleCancel = () => {
+    setShowForm(false);
+    setEditingLinkId(null);
+    setFormName('');
+    setFormGroup('');
+    setFormProxyUpdateInterval(24);
+  };
+
+  const handleEdit = (link: api.GeneratedLink) => {
+    setEditingLinkId(link.id);
+    setFormName(link.name);
+    setFormGroup(link.group);
+    setFormSubGroupId(link.subscriptionGroupId);
+    setFormTplId(link.templateId);
+    setFormProxyUpdateInterval(link.proxyUpdateInterval ?? 24);
+    setShowForm(true);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const handleDelete = async (id: string) => {
@@ -1806,6 +1841,13 @@ function GeneratedLinksView() {
 
   if (loading) return <div className="p-10 text-technical-muted font-mono">Loading...</div>;
 
+  const formatInterval = (hours?: number) => {
+    if (!hours) return '24 小时 (默认)';
+    if (hours === 24) return '24 小时';
+    if (hours % 24 === 0) return `${hours / 24} 天`;
+    return `${hours} 小时`;
+  };
+
   return (
     <div className="p-6 md:p-10 space-y-8 w-full max-w-[1600px] mx-auto">
        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-end border-b border-technical-border pb-6 gap-6">
@@ -1813,15 +1855,24 @@ function GeneratedLinksView() {
           <h2 className="text-2xl font-display font-bold text-white">已生成链接</h2>
           <p className="text-sm text-technical-muted mt-1">管理并分发订阅连接 URL。</p>
         </div>
-        <button className="technical-button-outline border-technical-cyan/30 text-technical-cyan hover:bg-technical-cyan/5" onClick={() => setShowForm(!showForm)}>
+        <button className="technical-button-outline border-technical-cyan/30 text-technical-cyan hover:bg-technical-cyan/5" onClick={() => {
+          if (showForm) {
+            handleCancel();
+          } else {
+            setShowForm(true);
+          }
+        }}>
           <LinkIcon size={14} />
-          <span>{showForm ? '取消生成' : '生成新链接'}</span>
+          <span>{showForm ? '取消' : '生成新链接'}</span>
         </button>
       </div>
 
       {showForm && (
         <div className="technical-card p-6 bg-black/40 border-technical-cyan/50">
-          <form onSubmit={handleCreate} className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="text-sm font-display font-bold text-white mb-4">
+            {editingLinkId ? `修改链接: ${formName}` : '生成新订阅链接'}
+          </div>
+          <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-4">
              <div>
                <label className="block text-xs text-technical-muted mb-1">链接名称</label>
                <input type="text" className="technical-input w-full" value={formName} onChange={e => setFormName(e.target.value)} required />
@@ -1842,8 +1893,42 @@ function GeneratedLinksView() {
                  {templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
                </select>
              </div>
-             <div className="md:col-span-2 pt-2">
-               <button type="submit" className="technical-button-primary w-full md:w-auto">生成链接</button>
+             <div>
+               <label className="block text-xs text-technical-muted mb-1">订阅更新间隔 (小时)</label>
+               <div className="flex gap-2">
+                 <input 
+                   type="number" 
+                   className="technical-input flex-1" 
+                   value={formProxyUpdateInterval} 
+                   onChange={e => setFormProxyUpdateInterval(parseInt(e.target.value, 10) || 24)} 
+                   required 
+                   min="1"
+                 />
+                 <select 
+                   className="technical-input bg-zinc-900 text-xs w-32"
+                   value={formProxyUpdateInterval}
+                   onChange={e => setFormProxyUpdateInterval(parseInt(e.target.value, 10) || 24)}
+                 >
+                   <option value="1">1 小时</option>
+                   <option value="3">3 小时</option>
+                   <option value="6">6 小时</option>
+                   <option value="12">12 小时 (720分)</option>
+                   <option value="24">24 小时</option>
+                   <option value="72">3 天</option>
+                   <option value="168">7 天</option>
+                 </select>
+               </div>
+             </div>
+             <div>
+               {/* 占位，使按钮排在左侧 */}
+             </div>
+             <div className="md:col-span-2 pt-2 flex gap-3">
+               <button type="submit" className="technical-button-primary w-full md:w-auto">
+                 {editingLinkId ? '保存修改' : '生成链接'}
+               </button>
+               <button type="button" className="technical-button-outline w-full md:w-auto border-zinc-700 text-zinc-400 hover:bg-zinc-800/40" onClick={handleCancel}>
+                 取消
+               </button>
              </div>
           </form>
         </div>
@@ -1881,6 +1966,10 @@ function GeneratedLinksView() {
                     <td className="px-6 py-4 text-xs font-mono text-gray-400">
                       <div>{groupName}</div>
                       <div className="text-[10px] text-technical-muted">+{tplName}</div>
+                      <div className="text-[10px] text-technical-cyan/70 mt-1 flex items-center gap-1">
+                        <Clock size={10} />
+                        <span>更新间隔: {formatInterval(link.proxyUpdateInterval)}</span>
+                      </div>
                     </td>
                     <td className={`px-6 py-4 text-xs font-mono ${isExpired ? 'text-red-500' : 'text-technical-muted'}`}>
                       {link.expiresAt ? new Date(link.expiresAt).toLocaleDateString() : '永不'}
@@ -1890,6 +1979,14 @@ function GeneratedLinksView() {
                         <button className="technical-button-outline py-1 px-3 h-8 gap-2 inline-flex" onClick={() => handleCopy(link.token)} disabled={!!isExpired}>
                           <Copy size={12} />
                           <span className="hidden sm:inline">复制</span>
+                        </button>
+                        <button 
+                          className="technical-button-outline border-technical-muted/30 text-technical-muted hover:text-white py-1 px-2 h-8 gap-1 inline-flex" 
+                          onClick={() => handleEdit(link)}
+                          title="修改/修正链接"
+                        >
+                          <Settings2 size={12} />
+                          <span className="hidden sm:inline">修正</span>
                         </button>
                         <button className="text-red-500/50 hover:text-red-500 p-2" onClick={() => handleDelete(link.id)} title="删除链接">
                           <Trash2 size={14} />
