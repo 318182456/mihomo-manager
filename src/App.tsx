@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+﻿import { useState, useEffect } from 'react';
 import type { FormEvent } from 'react';
 import CodeMirror from '@uiw/react-codemirror';
 import { yaml } from '@codemirror/lang-yaml';
@@ -1894,31 +1894,22 @@ function GeneratedLinksView() {
                </select>
              </div>
              <div>
-               <label className="block text-xs text-technical-muted mb-1">订阅更新间隔 (小时)</label>
-               <div className="flex gap-2">
-                 <input 
-                   type="number" 
-                   className="technical-input flex-1" 
-                   value={formProxyUpdateInterval} 
-                   onChange={e => setFormProxyUpdateInterval(parseInt(e.target.value, 10) || 24)} 
-                   required 
-                   min="1"
-                 />
-                 <select 
-                   className="technical-input bg-zinc-900 text-xs w-32"
-                   value={formProxyUpdateInterval}
-                   onChange={e => setFormProxyUpdateInterval(parseInt(e.target.value, 10) || 24)}
-                 >
-                   <option value="1">1 小时</option>
-                   <option value="3">3 小时</option>
-                   <option value="6">6 小时</option>
-                   <option value="12">12 小时 (720分)</option>
-                   <option value="24">24 小时</option>
-                   <option value="72">3 天</option>
-                   <option value="168">7 天</option>
-                 </select>
-               </div>
-             </div>
+                <label className="block text-xs text-technical-muted mb-1">订阅更新间隔</label>
+                <select 
+                  className="technical-input w-full"
+                  value={formProxyUpdateInterval}
+                  onChange={e => setFormProxyUpdateInterval(parseInt(e.target.value, 10) || 24)}
+                >
+                  <option value="1">1 小时 (60分钟)</option>
+                  <option value="3">3 小时 (180分钟)</option>
+                  <option value="6">6 小时 (360分钟)</option>
+                  <option value="12">12 小时 (720分钟)</option>
+                  <option value="24">24 小时 (1440分钟 - 默认)</option>
+                  <option value="48">48 小时 (2天)</option>
+                  <option value="72">72 小时 (3天)</option>
+                  <option value="168">168 小时 (7天)</option>
+                </select>
+              </div>
              <div>
                {/* 占位，使按钮排在左侧 */}
              </div>
