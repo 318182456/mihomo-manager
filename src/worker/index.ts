@@ -1895,12 +1895,7 @@ async function fetchProxiesFromGroup(
         if (entry.hysteria2Mtu) p.mtu = entry.hysteria2Mtu;
       }
 
-      const isCdn = p.name.toLowerCase().includes('cdn') || (
-        !entry.cfOptimizeOnlyCdn &&
-        (p.type === 'vmess' || p.type === 'vless' || p.type === 'trojan') && 
-        p.network === 'ws' && 
-        (p.tls || p.security === 'tls')
-      );
+      const isCdn = p.name.toLowerCase().includes('cdn');
 
       if (isNight && !isCdn) {
         continue;
