@@ -1775,9 +1775,13 @@ async function fetchProxiesFromGroup(
   const rawYamls: string[] = [];
   const proxies: any[] = [];
 
+  const parsedProxiesList: any[][] = [];
   for (let i = 0; i < results.length; i++) {
     const res = results[i];
-    if (res.status !== 'fulfilled' || !res.value) continue;
+    if (res.status !== 'fulfilled' || !res.value) {
+      parsedProxiesList.push([]);
+      continue;
+    }
     rawYamls.push(res.value);
 
     let parsed = [];
@@ -1793,11 +1797,62 @@ async function fetchProxiesFromGroup(
         }
       } catch { /* 忽略解析错误 */ }
     }
+    parsedProxiesList.push(parsed);
+  }
 
+  // 针对启用了 cfOptimize 的订阅，收集其唯一 server 并批量查/触发 GFW 检测
+  const uniqueServers = new Set<string>();
+  for (let i = 0; i < parsedProxiesList.length; i++) {
     const entry = group.urls[i];
+    if (entry && entry.cfOptimize) {
+      for (const p of parsedProxiesList[i]) {
+        if (p && p.server) {
+          uniqueServers.add(p.server);
+        }
+      }
+    }
+  }
+
+  // 1. 将域名解析为 IP
+  const serverToIpMap = new Map<string, string>();
+  await Promise.all(Array.from(uniqueServers).map(async server => {
+    const ip = await resolveDomainToIp(server);
+    serverToIpMap.set(server, ip);
+  }));
+
+  // 2. 并行批量读取/检测 IP 的 GFW 状态
+  const gfwStatusMap = new Map<string, boolean>();
+  await Promise.all(Array.from(uniqueServers).map(async server => {
+    const ip = serverToIpMap.get(server) || server;
+    const cacheKey = `gfw_status:${ip}`;
+    try {
+      const cached = await env.KV.get(cacheKey);
+      if (cached) {
+        const { blocked, updatedAt } = JSON.parse(cached);
+        if (Date.now() - updatedAt < 4 * 3600 * 1000) {
+          gfwStatusMap.set(server, blocked);
+          return;
+        }
+      }
+    } catch (e) {
+      console.error(`[GFW Check] 读取 KV 异常 (${ip}):`, e);
+    }
+    if (ctx) {
+      ctx.waitUntil(checkIpBlocked(ip, env).catch(err => {
+        console.error(`[GFW Check] 异步检测后台任务出错 (${ip}):`, err);
+      }));
+    }
+    gfwStatusMap.set(server, false);
+  }));
+
+  for (let i = 0; i < parsedProxiesList.length; i++) {
+    const entry = group.urls[i];
+    if (!entry) continue;
+    const parsed = parsedProxiesList[i];
+
     // 判断当前是否是 UTC+8 晚间 (18:00 - 06:00)
     let isNight = false;
-    if (entry && entry.onlyCdnAtNight) {
+    if (entry.onlyCdnAtNight) {
       const gmt8Hour = new Date(Date.now() + 8 * 3600 * 1000).getUTCHours();
       if (gmt8Hour >= 18 || gmt8Hour < 6) {
         isNight = true;
@@ -1855,8 +1910,10 @@ async function fetchProxiesFromGroup(
         const originalServer = p.server;
         const hostDomain = p.servername || p.sni || originalServer;
 
+        const isBlocked = gfwStatusMap.get(originalServer) || false;
+
         // 保留原节点
-        if (!entry.cfOptimizeHideOriginal) {
+        if (!entry.cfOptimizeHideOriginal && !isBlocked) {
           proxies.push(p);
         }
 
@@ -2343,5 +2400,102 @@ function extractYamlPath(yamlContent: string, pathExpression?: string): string {
 function indentString(str: string, indent: string): string {
   if (!indent) return str;
   return str.split('\n').map(line => line.trim() ? indent + line : line).join('\n');
+}
+
+async function checkIpBlocked(host: string, env: Env): Promise<boolean> {
+  if (!host || host === 'localhost' || host === '127.0.0.1' || host.startsWith('192.168.') || host.startsWith('10.') || host.startsWith('172.')) {
+    return false;
+  }
+  const cacheKey = `gfw_status:${host}`;
+  try {
+    console.log(`[GFW Check] 开始检测主机: ${host}`);
+    const postRes = await fetch('https://api.globalping.io/v1/measurements', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'User-Agent': 'MihomoManager/1.0'
+      },
+      body: JSON.stringify({
+        type: 'ping',
+        target: host,
+        locations: [{ country: 'CN' }],
+        limit: 2
+      })
+    });
+
+    if (!postRes.ok) {
+      throw new Error(`Globalping trigger failed: HTTP ${postRes.status}`);
+    }
+
+    const postJson = await postRes.json() as any;
+    const measurementId = postJson.id;
+    if (!measurementId) {
+      throw new Error('No measurement ID returned from Globalping');
+    }
+
+    let blocked = false;
+    let completed = false;
+
+    // 轮询 3 次，每次间隔 3 秒
+    for (let i = 0; i < 3; i++) {
+      await new Promise(resolve => setTimeout(resolve, 3000));
+      const getRes = await fetch(`https://api.globalping.io/v1/measurements/${measurementId}`, {
+        headers: {
+          'User-Agent': 'MihomoManager/1.0'
+        }
+      });
+      if (!getRes.ok) continue;
+      const getJson = await getRes.json() as any;
+      if (getJson.status === 'finished') {
+        completed = true;
+        const results = getJson.results || [];
+        if (results.length > 0) {
+          // 如果所有 CN 探针均上报 100% 丢包，则判定为被墙/不可达
+          const allLoss = results.every((r: any) => r.result && r.result.stats && r.result.stats.loss === 100);
+          blocked = allLoss;
+        }
+        break;
+      }
+    }
+
+    if (!completed) {
+      console.warn(`[GFW Check] 轮询超时，未能在规定时间内获取完成结果: ${host}`);
+      return false;
+    }
+
+    // 缓存 GFW 检测结果（缓存在 KV，设置 24 小时长效，由 4 小时逻辑控制更新）
+    await env.KV.put(cacheKey, JSON.stringify({ blocked, updatedAt: Date.now() }), {
+      expirationTtl: 24 * 3600
+    });
+    console.log(`[GFW Check] 主机 ${host} 检测完成，被墙状态: ${blocked}`);
+    return blocked;
+  } catch (e) {
+    console.error(`[GFW Check] 检测异常: ${host}`, e);
+    return false;
+  }
+}
+
+async function resolveDomainToIp(host: string): Promise<string> {
+  if (!host) return host;
+  const ipRegex = /^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$/;
+  if (ipRegex.test(host)) return host;
+  if (host.includes(':') || host.startsWith('[')) return host;
+
+  try {
+    const res = await fetch(`https://cloudflare-dns.com/dns-query?name=${encodeURIComponent(host)}&type=A`, {
+      headers: { 'Accept': 'application/dns-json' }
+    });
+    if (!res.ok) return host;
+    const json = await res.json() as any;
+    if (json.Status === 0 && Array.isArray(json.Answer)) {
+      const aRecord = json.Answer.find((ans: any) => ans.type === 1);
+      if (aRecord && aRecord.data) {
+        return aRecord.data.trim();
+      }
+    }
+  } catch (e) {
+    console.error(`[DNS Resolve] Failed to resolve ${host}:`, e);
+  }
+  return host;
 }
 
