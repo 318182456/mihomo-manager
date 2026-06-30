@@ -2419,7 +2419,10 @@ async function checkIpBlocked(host: string, env: Env): Promise<boolean> {
         type: 'ping',
         target: host,
         locations: [{ country: 'CN' }],
-        limit: 2
+        limit: 2,
+        measurementOptions: {
+          packets: 5
+        }
       })
     });
 
@@ -2436,8 +2439,8 @@ async function checkIpBlocked(host: string, env: Env): Promise<boolean> {
     let blocked = false;
     let completed = false;
 
-    // 轮询 3 次，每次间隔 3 秒
-    for (let i = 0; i < 3; i++) {
+    // 轮询 5 次，每次间隔 3 秒（限额 5 个包通常可在 5~8 秒内完成）
+    for (let i = 0; i < 5; i++) {
       await new Promise(resolve => setTimeout(resolve, 3000));
       const getRes = await fetch(`https://api.globalping.io/v1/measurements/${measurementId}`, {
         headers: {
