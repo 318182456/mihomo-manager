@@ -1965,6 +1965,11 @@ async function fetchProxiesFromGroup(
         continue;
       }
 
+      const isBlocked = gfwStatusMap.get(p.server) || false;
+      if (isBlocked) {
+        continue;
+      }
+
       proxies.push(p);
     }
   }
