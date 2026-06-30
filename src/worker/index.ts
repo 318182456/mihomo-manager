@@ -789,6 +789,24 @@ async function handleAPI(request: Request, env: Env, pathname: string): Promise<
       case 'templates':     return handleTemplates(request, env.ATTACHMENTS, method, id);
       case 'links':         return handleLinks(request, env.KV, method, id);
       case 'dashboard':     return handleDashboard(env);
+      case 'gfw':
+        if (method === 'POST' && id === 'check') {
+          const body: any = await request.json().catch(() => ({}));
+          const host = body.host || body.ip || body.server;
+          if (!host) return err('Missing host or ip or server in request body', 400);
+          const blocked = await checkIpBlocked(host, env);
+          return ok({ success: true, host, blocked });
+        }
+        return err404();
+      case 'vps':
+        if (method === 'POST' && id === 'ip-changed') {
+          const body: any = await request.json().catch(() => ({}));
+          const host = body.host || body.ip || body.server;
+          if (!host) return err('Missing host or ip or server in request body', 400);
+          const blocked = await checkIpBlocked(host, env);
+          return ok({ success: true, host, blocked });
+        }
+        return err404();
       default:              return err404();
     }
   } catch (e) {
