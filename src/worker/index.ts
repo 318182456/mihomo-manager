@@ -2118,11 +2118,27 @@ async function renderTemplate(template: string, group: SubscriptionGroup, filter
     maxDepth--;
   } while (output !== prevOutput && maxDepth > 0);
 
+  let providerParams = '';
+  if (requestUrl) {
+    try {
+      const urlObj = new URL(requestUrl);
+      urlObj.searchParams.delete('provider');
+      urlObj.searchParams.delete('url_id');
+      urlObj.searchParams.delete('url_index');
+      const paramStr = urlObj.searchParams.toString();
+      if (paramStr) {
+        providerParams = `&${paramStr}`;
+      }
+    } catch (e) {
+      console.error('[Template] 解析 requestUrl 失败:', e);
+    }
+  }
+
   // 3. {{PROVIDERS}} → 完整 proxy-providers YAML 块 (代理 URL 以应用 Hysteria 2 参数和过滤规则)
   if (output.includes('# {{PROVIDERS}}') || output.includes('{{PROVIDERS}}')) {
     const providerLines = group.urls.map((entry, i) => {
       const name = entry.name ?? `p${i + 1}`;
-      const providerUrl = subUrlBase ? `${subUrlBase}?provider=${encodeURIComponent(name)}` : entry.url;
+      const providerUrl = subUrlBase ? `${subUrlBase}?provider=${encodeURIComponent(name)}${providerParams}` : entry.url;
       const lines = [
         `  ${name}:`,
         `    url: "${providerUrl}"`,
