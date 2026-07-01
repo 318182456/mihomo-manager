@@ -1910,8 +1910,7 @@ async function fetchProxiesFromGroup(
       if (p.type === 'vless' || p.type === 'trojan' || p.type === 'vmess') {
         p.smux = {
           enabled: true,
-          'max-streams': 32,
-          protocol: 'h2-mux'
+          'max-streams': 32
         };
       }
 
