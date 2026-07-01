@@ -1,4 +1,4 @@
-﻿import { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import type { FormEvent } from 'react';
 import CodeMirror from '@uiw/react-codemirror';
 import { yaml } from '@codemirror/lang-yaml';
@@ -1742,6 +1742,12 @@ function GeneratedLinksView() {
   const [templates, setTemplates] = useState<api.Template[]>([]);
   const [loading, setLoading] = useState(true);
 
+  // Checkbox states for CT/CU/CMCC
+  const [useCt, setUseCt] = useState(true);
+  const [useCu, setUseCu] = useState(true);
+  const [useCmcc, setUseCmcc] = useState(true);
+  const [ipsNum, setIpsNum] = useState(6);
+
   // Form state
   const [showForm, setShowForm] = useState(false);
   const [editingLinkId, setEditingLinkId] = useState<string | null>(null);
@@ -1835,7 +1841,30 @@ function GeneratedLinksView() {
   };
 
   const handleCopy = (token: string) => {
-    const url = api.buildSubUrl(token);
+    let url = api.buildSubUrl(token);
+    const params: string[] = [];
+    
+    const selected = [];
+    if (useCt) selected.push('ct');
+    if (useCu) selected.push('cu');
+    if (useCmcc) selected.push('cmcc');
+
+    if (selected.length < 3) {
+      if (selected.length === 0) {
+        params.push('isp=none');
+      } else {
+        params.push(`isp=${selected.join(',')}`);
+      }
+    }
+
+    if (ipsNum !== 6) {
+      params.push(`ips=${ipsNum}`);
+    }
+
+    if (params.length > 0) {
+      url += `?${params.join('&')}`;
+    }
+    
     navigator.clipboard.writeText(url).then(() => alert('已复制：' + url));
   };
 
@@ -1865,6 +1894,50 @@ function GeneratedLinksView() {
           <LinkIcon size={14} />
           <span>{showForm ? '取消' : '生成新链接'}</span>
         </button>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-6 bg-zinc-900/50 p-4 rounded border border-technical-border/50 animate-fadeIn">
+        <span className="text-xs font-semibold text-technical-muted">优选运营商：</span>
+        <label className="flex items-center gap-2 text-xs text-gray-300 cursor-pointer select-none">
+          <input 
+            type="checkbox" 
+            checked={useCt} 
+            onChange={e => setUseCt(e.target.checked)} 
+            className="rounded border-zinc-700 bg-zinc-800 text-technical-cyan focus:ring-0 focus:ring-offset-0" 
+          />
+          <span>电信</span>
+        </label>
+        <label className="flex items-center gap-2 text-xs text-gray-300 cursor-pointer select-none">
+          <input 
+            type="checkbox" 
+            checked={useCu} 
+            onChange={e => setUseCu(e.target.checked)} 
+            className="rounded border-zinc-700 bg-zinc-800 text-technical-cyan focus:ring-0 focus:ring-offset-0" 
+          />
+          <span>联通</span>
+        </label>
+        <label className="flex items-center gap-2 text-xs text-gray-300 cursor-pointer select-none">
+          <input 
+            type="checkbox" 
+            checked={useCmcc} 
+            onChange={e => setUseCmcc(e.target.checked)} 
+            className="rounded border-zinc-700 bg-zinc-800 text-technical-cyan focus:ring-0 focus:ring-offset-0" 
+          />
+          <span>移动</span>
+        </label>
+        <div className="h-4 w-px bg-technical-border/50 hidden sm:block" />
+        <div className="flex items-center gap-2 text-xs text-gray-300">
+          <span>优选数量 (ips)：</span>
+          <input 
+            type="number" 
+            min={1} 
+            max={100}
+            value={ipsNum} 
+            onChange={e => setIpsNum(Math.max(1, parseInt(e.target.value, 10) || 6))}
+            className="w-14 bg-zinc-800 border border-zinc-700 rounded text-center text-technical-cyan focus:outline-none focus:ring-0 focus:ring-offset-0 py-0.5" 
+          />
+        </div>
+        <span className="text-[10px] text-technical-muted ml-auto">* 复制订阅链接时，仅包含已勾选运营商和设定数量的优选 IP 节点。</span>
       </div>
 
       {showForm && (

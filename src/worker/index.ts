@@ -1175,9 +1175,19 @@ interface OptimizedIP {
   isp: string;
 }
 
-async function fetchCloudflareOptimizedIPs(env: Env): Promise<OptimizedIP[]> {
+async function fetchCloudflareOptimizedIPs(
+  env: Env, 
+  ispParam?: string | null,
+  ipsParam?: string | null
+): Promise<OptimizedIP[]> {
   try {
     console.log('[CF IP] 开始从 cf.090227.xyz 获取优选 IP...');
+
+    const activeIsps = ispParam ? ispParam.split(',').map(s => s.trim().toLowerCase()) : ['ct', 'cu', 'cmcc'];
+    const showCt = activeIsps.includes('ct');
+    const showCu = activeIsps.includes('cu');
+    const showCmcc = activeIsps.includes('cmcc');
+    const ipsNum = parseInt(ipsParam || '6', 10) || 6;
 
     const fetchIPsForISP = async (url: string, ispName: string): Promise<OptimizedIP[]> => {
       const res = await fetch(url, {
@@ -1205,11 +1215,17 @@ async function fetchCloudflareOptimizedIPs(env: Env): Promise<OptimizedIP[]> {
       return ips;
     };
 
-    const [teleIPs, unicIPs, mobiIPs] = await Promise.all([
-      fetchIPsForISP('https://cf.090227.xyz/ct?ips=6', '电信'),
-      fetchIPsForISP('https://cf.090227.xyz/cu', '联通'),
-      fetchIPsForISP('https://cf.090227.xyz/cmcc?ips=8', '移动')
-    ]);
+    const tasks: Promise<OptimizedIP[]>[] = [];
+    if (showCt) tasks.push(fetchIPsForISP(`https://cf.090227.xyz/ct?ips=${ipsNum}`, '电信'));
+    else tasks.push(Promise.resolve([]));
+
+    if (showCu) tasks.push(fetchIPsForISP(`https://cf.090227.xyz/cu?ips=${ipsNum}`, '联通'));
+    else tasks.push(Promise.resolve([]));
+
+    if (showCmcc) tasks.push(fetchIPsForISP(`https://cf.090227.xyz/cmcc?ips=${ipsNum}`, '移动'));
+    else tasks.push(Promise.resolve([]));
+
+    const [teleIPs, unicIPs, mobiIPs] = await Promise.all(tasks);
 
     const interleavedIps: OptimizedIP[] = [];
     const maxLength = Math.max(teleIPs.length, unicIPs.length, mobiIPs.length);
@@ -1741,7 +1757,9 @@ function simplifyNodeName(name: string): string {
 async function fetchProxiesFromGroup(
   group: SubscriptionGroup,
   env: Env,
-  ctx?: ExecutionContext
+  ctx?: ExecutionContext,
+  ispParam?: string | null,
+  ipsParam?: string | null
 ): Promise<{ proxies: any[]; rawYamls: string[] }> {
   const filter = compileGroupFilter(group.filter);
   const filterRe = filter ? new RegExp(filter) : null;
@@ -1749,7 +1767,7 @@ async function fetchProxiesFromGroup(
   const needCfOptimize = group.urls.some(u => u.cfOptimize);
   let cfIps: OptimizedIP[] = [];
   if (needCfOptimize) {
-    cfIps = await fetchCloudflareOptimizedIPs(env);
+    cfIps = await fetchCloudflareOptimizedIPs(env, ispParam, ipsParam);
   }
 
   const results = await Promise.allSettled(
@@ -1995,6 +2013,8 @@ async function handleSubFetch(pathname: string, env: Env, request: Request, ctx:
   const providerParam = urlParams.get('provider');
   const urlIdParam = urlParams.get('url_id');
   const urlIndexParam = urlParams.get('url_index');
+  const ispParam = urlParams.get('isp');
+  const ipsParam = urlParams.get('ips');
 
   // 若请求指定了特定的上级订阅源，则作为 proxy-provider 接口直接返回节点列表
   if (providerParam || urlIdParam || urlIndexParam !== null) {
@@ -2011,7 +2031,7 @@ async function handleSubFetch(pathname: string, env: Env, request: Request, ctx:
     }
 
     const resolvedGroup = { ...group, urls: targetUrls };
-    const { proxies } = await fetchProxiesFromGroup(resolvedGroup, env, ctx);
+    const { proxies } = await fetchProxiesFromGroup(resolvedGroup, env, ctx, ispParam, ipsParam);
     const userInfo = await fetchSubscriptionUserInfo(targetUrls, env, ctx);
 
     if (wantNodes) {
@@ -2029,7 +2049,7 @@ async function handleSubFetch(pathname: string, env: Env, request: Request, ctx:
   const userInfo = await fetchSubscriptionUserInfo(group.urls, env, ctx);
 
   // 拉取并过滤代理节点
-  const { proxies, rawYamls } = await fetchProxiesFromGroup(group, env, ctx);
+  const { proxies, rawYamls } = await fetchProxiesFromGroup(group, env, ctx, ispParam, ipsParam);
 
   if (!tpl) {
     if (proxies.length > 0) {
