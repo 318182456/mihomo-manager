@@ -19,6 +19,12 @@ export interface Env {
   ATTACHMENTS: R2Bucket;
   /** 管理员密码，在 Cloudflare Secret / .dev.vars 中配置 */
   ADMIN_PASSWORD?: string;
+  /** uouin API 账号，在 Cloudflare Secret / .dev.vars 中配置 */
+  UOUIN_USERNAME?: string;
+  /** uouin API 密钥，在 Cloudflare Secret / .dev.vars 中配置 */
+  UOUIN_KEY?: string;
+  /** 需要传入加速的主机地址，可在 Cloudflare Secret / .dev.vars 中配置 */
+  UOUIN_URL?: string;
 }
 
 // ---------- 默认模板配置 ----------
@@ -1169,93 +1175,55 @@ interface OptimizedIP {
   isp: string;
 }
 
-interface OptimizedIPsCache {
-  updatedAt: number;
-  ips: OptimizedIP[];
-}
-
 async function fetchCloudflareOptimizedIPs(env: Env): Promise<OptimizedIP[]> {
-  const cacheKey = 'cloudflare_optimized_ips';
   try {
-    const cached = await env.KV.get(cacheKey);
-    if (cached) {
-      const parsed = JSON.parse(cached) as OptimizedIPsCache;
-      if (Date.now() - parsed.updatedAt < 600 * 1000) {
-        return parsed.ips;
+    console.log('[CF IP] 开始从 cf.090227.xyz 获取优选 IP...');
+
+    const fetchIPsForISP = async (url: string, ispName: string): Promise<OptimizedIP[]> => {
+      const res = await fetch(url, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+        }
+      });
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status} for ${ispName}`);
       }
-    }
-  } catch (e) {
-    console.error('[CF IP] 读取缓存失败:', e);
-  }
-
-  try {
-    console.log('[CF IP] 开始获取优选 IP...');
-    const res = await fetch('https://api.uouin.com/cloudflare.html', {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+      const text = await res.text();
+      const lines = text.split('\n');
+      const ips: OptimizedIP[] = [];
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        const parts = trimmed.split('#');
+        if (parts[0]) {
+          ips.push({
+            ip: parts[0].trim(),
+            isp: ispName
+          });
+        }
       }
-    });
-    if (!res.ok) {
-      throw new Error(`HTTP ${res.status}`);
-    }
-    const html = await res.text();
+      return ips;
+    };
 
-    const trRegex = /<tr[^>]*>([\s\S]*?)<\/tr>/g;
-    const ipRegex = /href="http:\/\/\[?([a-fA-F0-9:.]+)(?:\])?\/cdn-cgi\/trace"/;
-    const operatorRegex = /<td>\s*(电信|联通|移动|IPV6)\s*<\/td>/i;
-
-    let match;
-    const teleIPs: string[] = [];
-    const unicIPs: string[] = [];
-    const mobiIPs: string[] = [];
-    const ipv6IPs: string[] = [];
-    const otherIPs: string[] = [];
-
-    while ((match = trRegex.exec(html)) !== null) {
-      const trContent = match[1];
-      const ipMatch = ipRegex.exec(trContent);
-      if (ipMatch) {
-        const ip = ipMatch[1];
-        const opMatch = operatorRegex.exec(trContent);
-        const op = opMatch ? opMatch[1].trim() : '';
-        if (op === '电信') teleIPs.push(ip);
-        else if (op === '联通') unicIPs.push(ip);
-        else if (op === '移动') mobiIPs.push(ip);
-        else if (op === 'IPV6') ipv6IPs.push(ip);
-        else otherIPs.push(ip);
-      }
-    }
+    const [teleIPs, unicIPs, mobiIPs] = await Promise.all([
+      fetchIPsForISP('https://cf.090227.xyz/ct?ips=6', '电信'),
+      fetchIPsForISP('https://cf.090227.xyz/cu', '联通'),
+      fetchIPsForISP('https://cf.090227.xyz/cmcc?ips=8', '移动')
+    ]);
 
     const interleavedIps: OptimizedIP[] = [];
     const maxLength = Math.max(teleIPs.length, unicIPs.length, mobiIPs.length);
     for (let i = 0; i < maxLength; i++) {
-      if (i < teleIPs.length) interleavedIps.push({ ip: teleIPs[i], isp: '电信' });
-      if (i < unicIPs.length) interleavedIps.push({ ip: unicIPs[i], isp: '联通' });
-      if (i < mobiIPs.length) interleavedIps.push({ ip: mobiIPs[i], isp: '移动' });
+      if (i < teleIPs.length) interleavedIps.push(teleIPs[i]);
+      if (i < unicIPs.length) interleavedIps.push(unicIPs[i]);
+      if (i < mobiIPs.length) interleavedIps.push(mobiIPs[i]);
     }
 
-    ipv6IPs.forEach(ip => interleavedIps.push({ ip, isp: 'IPv6' }));
-    otherIPs.forEach(ip => interleavedIps.push({ ip, isp: '其他' }));
-
-    if (interleavedIps.length > 0) {
-      await env.KV.put(cacheKey, JSON.stringify({
-        updatedAt: Date.now(),
-        ips: interleavedIps
-      }));
-      console.log(`[CF IP] 成功获取并缓存了 ${interleavedIps.length} 个 IP (电信:${teleIPs.length}, 联通:${unicIPs.length}, 移动:${mobiIPs.length})`);
-      return interleavedIps;
-    }
+    console.log(`[CF IP] 成功获取了 ${interleavedIps.length} 个 IP (电信:${teleIPs.length}, 联通:${unicIPs.length}, 移动:${mobiIPs.length})`);
+    return interleavedIps;
   } catch (e) {
     console.error('[CF IP] 获取优选 IP 异常:', e);
   }
-
-  try {
-    const cached = await env.KV.get(cacheKey);
-    if (cached) {
-      const parsed = JSON.parse(cached) as OptimizedIPsCache;
-      return parsed.ips;
-    }
-  } catch {}
 
   return [];
 }
