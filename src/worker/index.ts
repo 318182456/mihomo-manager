@@ -1906,16 +1906,7 @@ async function fetchProxiesFromGroup(
           delete p.flow;
         }
       }
-
       const isCdn = p.name.toLowerCase().includes('cdn');
-
-      if ((p.type === 'vless' || p.type === 'trojan' || p.type === 'vmess') && isCdn && p.flow !== 'xtls-rprx-vision') {
-        p.smux = {
-          enabled: true,
-          'max-streams': 32
-        };
-      }
-
       if (p.type === 'hysteria2') {
         if (entry.hysteria2Up) p.up = entry.hysteria2Up;
         if (entry.hysteria2Down) p.down = entry.hysteria2Down;
