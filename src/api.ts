@@ -33,6 +33,7 @@ export interface UrlEntry {
   cfOptimizeType?: 'api' | 'custom';
   simplifyNames?: boolean;
   onlyCdnAtNight?: boolean;
+  cfOptimizeIsp?: string;
 }
 
 export interface SubscriptionGroup {
