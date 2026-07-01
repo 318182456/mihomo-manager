@@ -1907,6 +1907,14 @@ async function fetchProxiesFromGroup(
         }
       }
 
+      if (p.type === 'vless' || p.type === 'trojan' || p.type === 'vmess') {
+        p.smux = {
+          enabled: true,
+          'max-streams': 32,
+          protocol: 'h2-mux'
+        };
+      }
+
       if (p.type === 'hysteria2') {
         if (entry.hysteria2Up) p.up = entry.hysteria2Up;
         if (entry.hysteria2Down) p.down = entry.hysteria2Down;
