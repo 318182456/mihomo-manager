@@ -1907,7 +1907,9 @@ async function fetchProxiesFromGroup(
         }
       }
 
-      if (p.type === 'vless' || p.type === 'trojan' || p.type === 'vmess') {
+      const isCdn = p.name.toLowerCase().includes('cdn');
+
+      if ((p.type === 'vless' || p.type === 'trojan' || p.type === 'vmess') && isCdn && p.flow !== 'xtls-rprx-vision') {
         p.smux = {
           enabled: true,
           'max-streams': 32
@@ -1919,8 +1921,6 @@ async function fetchProxiesFromGroup(
         if (entry.hysteria2Down) p.down = entry.hysteria2Down;
         if (entry.hysteria2Mtu) p.mtu = entry.hysteria2Mtu;
       }
-
-      const isCdn = p.name.toLowerCase().includes('cdn');
 
       if (isNight && !isCdn) {
         continue;
