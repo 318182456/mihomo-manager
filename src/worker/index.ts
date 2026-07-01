@@ -1765,12 +1765,6 @@ async function fetchProxiesFromGroup(
   const filter = compileGroupFilter(group.filter);
   const filterRe = filter ? new RegExp(filter) : null;
 
-  const needCfOptimize = group.urls.some(u => u.cfOptimize);
-  let cfIps: OptimizedIP[] = [];
-  if (needCfOptimize) {
-    cfIps = await fetchCloudflareOptimizedIPs(env, ispParam, ipsParam);
-  }
-
   const results = await Promise.allSettled(
     group.urls.map(entry =>
       fetchSubscriptionWithCache(env, entry, ctx, 'clash.meta').then(c => c.data)
@@ -1855,6 +1849,13 @@ async function fetchProxiesFromGroup(
     if (!entry) continue;
     const parsed = parsedProxiesList[i];
 
+    let entryCfIps: OptimizedIP[] = [];
+    if (entry.cfOptimize) {
+      const currentIsp = ispParam || entry.cfOptimizeIsp || 'ct,cu,cmcc';
+      const currentIpsNum = ipsParam || (entry.cfOptimizeNum ? String(entry.cfOptimizeNum) : '6');
+      entryCfIps = await fetchCloudflareOptimizedIPs(env, currentIsp, currentIpsNum);
+    }
+
     // 判断当前是否是 UTC+8 晚间 (18:00 - 06:00)
     let isNight = false;
     if (entry.onlyCdnAtNight) {
@@ -1904,7 +1905,7 @@ async function fetchProxiesFromGroup(
         continue;
       }
 
-      if (entry.cfOptimize && isCdn && (cfIps.length > 0 || entry.cfOptimizeDomain)) {
+      if (entry.cfOptimize && isCdn && (entryCfIps.length > 0 || entry.cfOptimizeDomain)) {
         const originalServer = p.server;
         const hostDomain = p.servername || p.sni || originalServer;
 
@@ -1926,7 +1927,7 @@ async function fetchProxiesFromGroup(
           }));
         } else {
           const limit = entry.cfOptimizeNum || 5;
-          const optimizedIps = cfIps.slice(0, limit);
+          const optimizedIps = entryCfIps.slice(0, limit);
           const ispCounts: Record<string, number> = {};
           targets = optimizedIps.map(opt => {
             if (!ispCounts[opt.isp]) ispCounts[opt.isp] = 0;
