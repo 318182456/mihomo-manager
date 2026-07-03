@@ -362,6 +362,7 @@ function LoginView({ onLogin }: { onLogin: () => void }) {
 function SourceGfwChecker({ domain }: { domain: string }) {
   const [status, setStatus] = useState<'unchecked' | 'checking' | 'blocked' | 'normal' | 'error'>('unchecked');
   const [lastUpdated, setLastUpdated] = useState<number | undefined>(undefined);
+  const [resolvedIp, setResolvedIp] = useState<string>('');
 
   const checkStatus = async (force: boolean) => {
     setStatus('checking');
@@ -369,9 +370,11 @@ function SourceGfwChecker({ domain }: { domain: string }) {
       if (force) {
         const res = await api.runGfwCheck(domain);
         setStatus(res.blocked ? 'blocked' : 'normal');
+        setResolvedIp(res.ip || '');
         setLastUpdated(Date.now());
       } else {
         const res = await api.checkGfwStatus(domain);
+        setResolvedIp(res.ip || '');
         if (res.blocked === null) {
           setStatus('unchecked');
         } else {
@@ -387,8 +390,9 @@ function SourceGfwChecker({ domain }: { domain: string }) {
   const markStatus = async (blocked: boolean) => {
     setStatus('checking');
     try {
-      await api.updateGfwStatus(domain, blocked);
+      const res = await api.updateGfwStatus(domain, blocked);
       setStatus(blocked ? 'blocked' : 'normal');
+      setResolvedIp(res.ip || '');
       setLastUpdated(Date.now());
     } catch {
       setStatus('error');
@@ -402,7 +406,9 @@ function SourceGfwChecker({ domain }: { domain: string }) {
   return (
     <div className="pt-2.5 border-t border-technical-border/20 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-black/20 p-3 rounded-sm">
       <div className="flex items-center gap-2">
-        <span className="text-[10px] font-display font-bold text-technical-muted uppercase tracking-widest">订阅域名状态 ({domain}) :</span>
+        <span className="text-[10px] font-display font-bold text-technical-muted uppercase tracking-widest">
+          订阅域名状态 ({domain}{resolvedIp && resolvedIp !== domain ? ` → ${resolvedIp}` : ''}) :
+        </span>
         {status === 'checking' && <span className="text-[10px] text-technical-cyan animate-pulse">检测中...</span>}
         {status === 'unchecked' && <span className="text-[10px] text-zinc-500">未检测</span>}
         {status === 'blocked' && <span className="px-1.5 py-0.5 bg-red-950/40 border border-red-500/30 text-[9px] font-bold text-red-400 rounded">被墙</span>}
@@ -441,6 +447,7 @@ function SourceGfwChecker({ domain }: { domain: string }) {
 
 function ProxyNodeBadge({ proxy, filterPattern }: { proxy: { name: string; server: string }; filterPattern: string }) {
   const [gfwStatus, setGfwStatus] = useState<'unchecked' | 'checking' | 'blocked' | 'normal' | 'error'>('unchecked');
+  const [resolvedIp, setResolvedIp] = useState<string>('');
   const [showActions, setShowActions] = useState(false);
 
   let isMatch = true;
@@ -458,8 +465,10 @@ function ProxyNodeBadge({ proxy, filterPattern }: { proxy: { name: string; serve
       if (force) {
         const res = await api.runGfwCheck(proxy.server);
         setGfwStatus(res.blocked ? 'blocked' : 'normal');
+        setResolvedIp(res.ip || '');
       } else {
         const res = await api.checkGfwStatus(proxy.server);
+        setResolvedIp(res.ip || '');
         if (res.blocked === null) {
           setGfwStatus('unchecked');
         } else {
@@ -475,8 +484,9 @@ function ProxyNodeBadge({ proxy, filterPattern }: { proxy: { name: string; serve
     if (!proxy.server) return;
     setGfwStatus('checking');
     try {
-      await api.updateGfwStatus(proxy.server, blocked);
+      const res = await api.updateGfwStatus(proxy.server, blocked);
       setGfwStatus(blocked ? 'blocked' : 'normal');
+      setResolvedIp(res.ip || '');
     } catch {
       setGfwStatus('error');
     }
@@ -518,7 +528,7 @@ function ProxyNodeBadge({ proxy, filterPattern }: { proxy: { name: string; serve
           <div className="fixed inset-0 z-40" onClick={() => setShowActions(false)} />
           <div className="absolute bottom-full left-0 mb-1 bg-zinc-950 border border-technical-border rounded-sm shadow-xl p-2 z-50 flex flex-col gap-1.5 min-w-[200px] text-xs font-sans">
             <div className="text-[9px] font-mono text-zinc-500 border-b border-technical-border/30 pb-1 mb-1 truncate">
-              {proxy.server}
+              {proxy.server}{resolvedIp && resolvedIp !== proxy.server ? ` (${resolvedIp})` : ''}
             </div>
             <button
               onClick={() => { checkStatus(true); setShowActions(false); }}

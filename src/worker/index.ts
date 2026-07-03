@@ -808,31 +808,34 @@ async function handleAPI(request: Request, env: Env, pathname: string): Promise<
           const body: any = await request.json().catch(() => ({}));
           const host = body.host || body.ip || body.server;
           if (!host) return err('Missing host or ip or server in request body', 400);
+          const ip = await resolveDomainToIp(host);
           const blocked = await checkIpBlocked(host, env);
-          return ok({ success: true, host, blocked });
+          return ok({ success: true, host, ip, blocked });
         }
         if (method === 'GET' && id === 'status') {
           const url = new URL(request.url);
           const host = url.searchParams.get('host');
           if (!host) return err('Missing host query parameter', 400);
-          const cacheKey = `gfw_status:${host}`;
+          const ip = await resolveDomainToIp(host);
+          const cacheKey = `gfw_status:${ip}`;
           const cached = await env.KV.get(cacheKey);
           if (cached) {
             const parsed = JSON.parse(cached);
-            return ok({ success: true, host, blocked: parsed.blocked, cached: true, updatedAt: parsed.updatedAt });
+            return ok({ success: true, host, ip, blocked: parsed.blocked, cached: true, updatedAt: parsed.updatedAt });
           }
-          return ok({ success: true, host, blocked: null, cached: false });
+          return ok({ success: true, host, ip, blocked: null, cached: false });
         }
         if (method === 'POST' && id === 'update') {
           const body: any = await request.json().catch(() => ({}));
           const host = body.host || body.ip || body.server;
           const blocked = body.blocked === true;
           if (!host) return err('Missing host or ip or server in request body', 400);
-          const cacheKey = `gfw_status:${host}`;
+          const ip = await resolveDomainToIp(host);
+          const cacheKey = `gfw_status:${ip}`;
           await env.KV.put(cacheKey, JSON.stringify({ blocked, updatedAt: Date.now() }), {
             expirationTtl: 24 * 3600
           });
-          return ok({ success: true, host, blocked });
+          return ok({ success: true, host, ip, blocked });
         }
         return err404();
       case 'vps':
@@ -2495,12 +2498,13 @@ function indentString(str: string, indent: string): string {
 }
 
 async function checkIpBlocked(host: string, env: Env): Promise<boolean> {
-  if (!host || host === 'localhost' || host === '127.0.0.1' || host.startsWith('192.168.') || host.startsWith('10.') || host.startsWith('172.')) {
+  const ip = await resolveDomainToIp(host);
+  if (!ip || ip === 'localhost' || ip === '127.0.0.1' || ip.startsWith('192.168.') || ip.startsWith('10.') || ip.startsWith('172.')) {
     return false;
   }
-  const cacheKey = `gfw_status:${host}`;
+  const cacheKey = `gfw_status:${ip}`;
   try {
-    console.log(`[GFW Check] 开始检测主机: ${host}`);
+    console.log(`[GFW Check] 开始检测主机: ${host} (解析IP: ${ip})`);
     const postRes = await fetch('https://api.globalping.io/v1/measurements', {
       method: 'POST',
       headers: {
@@ -2509,7 +2513,7 @@ async function checkIpBlocked(host: string, env: Env): Promise<boolean> {
       },
       body: JSON.stringify({
         type: 'ping',
-        target: host,
+        target: ip,
         locations: [{ country: 'CN' }],
         limit: 2,
         measurementOptions: {
