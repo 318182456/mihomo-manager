@@ -1762,7 +1762,7 @@ function SubscriptionsView() {
                                 setGlobalUrls(globalUrls.map(u => u.id === source.id ? { ...u, gcoreOptimizeDomain: e.target.value } : u));
                               }}
                               onBlur={(e) => {
-                                handleUpdateSource(source.id, { gcoreOptimizeDomain: e.target.value.trim() || undefined });
+                                handleUpdateSource(source.id, { gcoreOptimizeDomain: e.target.value.trim() });
                               }}
                               placeholder="输入域名或 IP 列表，如: Seoul-node.gcdn.co, 1.2.3.4"
                               className="w-full bg-black/40 border border-technical-border rounded-sm px-2.5 py-1.5 font-mono text-xs text-gray-300 focus:outline-none focus:border-technical-cyan/50"
