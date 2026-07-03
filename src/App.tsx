@@ -445,7 +445,7 @@ function SourceGfwChecker({ domain }: { domain: string }) {
   );
 }
 
-function ProxyNodeBadge({ proxy, filterPattern }: { proxy: { name: string; server: string }; filterPattern: string }) {
+function ProxyNodeBadge({ proxy, filterPattern }: { proxy: { name: string; server: string }; filterPattern: string; key?: any }) {
   const [gfwStatus, setGfwStatus] = useState<'unchecked' | 'checking' | 'blocked' | 'normal' | 'error'>('unchecked');
   const [resolvedIp, setResolvedIp] = useState<string>('');
   const [showActions, setShowActions] = useState(false);
