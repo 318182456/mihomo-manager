@@ -1714,10 +1714,10 @@ function SubscriptionsView() {
                       )}
                     </div>
 
-                    {/* Gcore 域名连接配置 */}
+                    {/* Gcore 优选配置 */}
                     <div className="pt-2 border-t border-technical-border/20 space-y-3">
                       <label className="block text-[10px] font-display font-bold text-technical-cyan uppercase tracking-widest">
-                        Gcore 域名连接配置 (直接将 Gcore 节点 server 指向其 CDN 域名连接)
+                        Gcore 优选配置 (可自定义低延迟 IP/域名)
                       </label>
                       
                       <div className="flex flex-col sm:flex-row sm:items-center gap-4 bg-black/20 p-3 rounded-sm border border-technical-border/30">
@@ -1731,7 +1731,7 @@ function SubscriptionsView() {
                             }}
                             className="bg-black/40 border border-technical-border rounded-sm text-technical-cyan focus:ring-0 outline-none w-3.5 h-3.5"
                           />
-                          <span className={source.gcoreOptimize ? 'text-technical-cyan font-bold' : ''}>启用 Gcore 域名连接</span>
+                          <span className={source.gcoreOptimize ? 'text-technical-cyan font-bold' : ''}>启用 Gcore 优化</span>
                         </label>
 
                         <label className={`flex items-center gap-2 text-[11px] text-technical-muted select-none ${source.gcoreOptimize ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'}`}>
@@ -1748,6 +1748,28 @@ function SubscriptionsView() {
                           <span>隐藏原节点</span>
                         </label>
                       </div>
+
+                      {source.gcoreOptimize && (
+                        <div className="space-y-3 p-3 bg-zinc-950 border border-technical-border/40 rounded-sm animate-fadeIn">
+                          <div className="animate-fadeIn">
+                            <label className="block text-[9px] font-display text-technical-muted uppercase tracking-widest mb-1">
+                              自定义 Gcore 优选域名/IP（以逗号/空格分隔，不填则默认直接使用域名连接）
+                            </label>
+                            <input
+                              type="text"
+                              value={source.gcoreOptimizeDomain ?? ''}
+                              onChange={(e) => {
+                                setGlobalUrls(globalUrls.map(u => u.id === source.id ? { ...u, gcoreOptimizeDomain: e.target.value } : u));
+                              }}
+                              onBlur={(e) => {
+                                handleUpdateSource(source.id, { gcoreOptimizeDomain: e.target.value.trim() || undefined });
+                              }}
+                              placeholder="输入域名或 IP 列表，如: Seoul-node.gcdn.co, 1.2.3.4"
+                              className="w-full bg-black/40 border border-technical-border rounded-sm px-2.5 py-1.5 font-mono text-xs text-gray-300 focus:outline-none focus:border-technical-cyan/50"
+                            />
+                          </div>
+                        </div>
+                      )}
                     </div>
 
                     {(() => {

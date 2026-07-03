@@ -1954,27 +1954,62 @@ async function fetchProxiesFromGroup(
           proxies.push(p);
         }
 
-        // 直接使用域名连接
-        const cloned = JSON.parse(JSON.stringify(p));
-        cloned.name = p.name;
-        cloned.server = hostDomain;
-        cloned.tls = true;
-        cloned.port = 443;
-
-        // 保持 SNI
-        if (!cloned.sni) cloned.sni = hostDomain;
-        if (!cloned.servername) cloned.servername = hostDomain;
-
-        // 对于 ws 传输，保持 Host
-        if (cloned.network === 'ws' || cloned.type === 'vmess') {
-          if (!cloned['ws-opts']) cloned['ws-opts'] = { path: '/' };
-          if (!cloned['ws-opts'].headers) cloned['ws-opts'].headers = {};
-          if (!cloned['ws-opts'].headers.Host && !cloned['ws-opts'].headers.host) {
-            cloned['ws-opts'].headers.Host = hostDomain;
-          }
+        // 获取优选列表
+        let targets: { ip: string; isp: string }[] = [];
+        if (entry.gcoreOptimizeDomain) {
+          const customList = entry.gcoreOptimizeDomain.split(/[,，\s]+/).map(x => x.trim()).filter(Boolean);
+          targets = customList.map((val, idx) => ({
+            ip: val,
+            isp: customList.length === 1 ? 'Gcore优选' : `Gcore优选 ${idx + 1}`
+          }));
         }
 
-        proxies.push(cloned);
+        if (targets.length > 0) {
+          targets.forEach((opt) => {
+            const cloned = JSON.parse(JSON.stringify(p));
+            cloned.name = `${p.name} - ${opt.isp}`;
+            cloned.server = opt.ip;
+            cloned.tls = true;
+            cloned.port = 443;
+
+            // 保持 SNI
+            if (!cloned.sni) cloned.sni = hostDomain;
+            if (!cloned.servername) cloned.servername = hostDomain;
+
+            // 对于 ws 传输，保持 Host
+            if (cloned.network === 'ws' || cloned.type === 'vmess') {
+              if (!cloned['ws-opts']) cloned['ws-opts'] = { path: '/' };
+              if (!cloned['ws-opts'].headers) cloned['ws-opts'].headers = {};
+              if (!cloned['ws-opts'].headers.Host && !cloned['ws-opts'].headers.host) {
+                cloned['ws-opts'].headers.Host = hostDomain;
+              }
+            }
+
+            proxies.push(cloned);
+          });
+        } else {
+          // 直接使用域名连接
+          const cloned = JSON.parse(JSON.stringify(p));
+          cloned.name = p.name;
+          cloned.server = hostDomain;
+          cloned.tls = true;
+          cloned.port = 443;
+
+          // 保持 SNI
+          if (!cloned.sni) cloned.sni = hostDomain;
+          if (!cloned.servername) cloned.servername = hostDomain;
+
+          // 对于 ws 传输，保持 Host
+          if (cloned.network === 'ws' || cloned.type === 'vmess') {
+            if (!cloned['ws-opts']) cloned['ws-opts'] = { path: '/' };
+            if (!cloned['ws-opts'].headers) cloned['ws-opts'].headers = {};
+            if (!cloned['ws-opts'].headers.Host && !cloned['ws-opts'].headers.host) {
+              cloned['ws-opts'].headers.Host = hostDomain;
+            }
+          }
+
+          proxies.push(cloned);
+        }
         continue;
       }
 
