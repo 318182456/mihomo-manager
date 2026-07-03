@@ -361,10 +361,64 @@ function LoginView({ onLogin }: { onLogin: () => void }) {
 
 function DashboardView() {
   const [stats, setStats] = useState<api.DashboardStats | null>(null);
+  const [gfwHost, setGfwHost] = useState('');
+  const [querying, setQuerying] = useState(false);
+  const [savingGfw, setSavingGfw] = useState(false);
+  const [gfwResult, setGfwResult] = useState<{ host: string; blocked: boolean | null; cached: boolean; updatedAt?: number } | null>(null);
 
   useEffect(() => {
     api.getDashboard().then(setStats).catch(console.error);
   }, []);
+
+  const handleQueryStatus = async () => {
+    if (!gfwHost.trim()) return alert('请输入 IP 或域名');
+    setQuerying(true);
+    try {
+      const res = await api.checkGfwStatus(gfwHost.trim());
+      setGfwResult(res);
+    } catch (e: any) {
+      alert('查询失败: ' + (e.message || e));
+    } finally {
+      setQuerying(false);
+    }
+  };
+
+  const handleRunCheck = async () => {
+    if (!gfwHost.trim()) return alert('请输入 IP 或域名');
+    setQuerying(true);
+    try {
+      const res = await api.runGfwCheck(gfwHost.trim());
+      setGfwResult({
+        host: res.host,
+        blocked: res.blocked,
+        cached: true,
+        updatedAt: Date.now()
+      });
+    } catch (e: any) {
+      alert('检测失败: ' + (e.message || e));
+    } finally {
+      setQuerying(false);
+    }
+  };
+
+  const handleManualUpdate = async (blocked: boolean) => {
+    if (!gfwHost.trim()) return alert('请输入 IP 或域名');
+    setSavingGfw(true);
+    try {
+      const res = await api.updateGfwStatus(gfwHost.trim(), blocked);
+      setGfwResult({
+        host: res.host,
+        blocked: res.blocked,
+        cached: true,
+        updatedAt: Date.now()
+      });
+      alert(`手动标记成功，当前状态：${blocked ? '已判定被墙' : '判定正常'}`);
+    } catch (e: any) {
+      alert('标记失败: ' + (e.message || e));
+    } finally {
+      setSavingGfw(false);
+    }
+  };
 
   const metrics = [
     { label: '活动订阅', value: stats?.activeSubscriptions ?? '-', total: stats?.totalSubscriptions, icon: Rss, color: 'text-technical-cyan' },
@@ -408,6 +462,83 @@ function DashboardView() {
             )}
           </div>
         ))}
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="technical-card p-6 lg:col-span-2 space-y-4">
+          <div className="flex items-center gap-2 border-b border-technical-border/30 pb-3">
+             <AlertTriangle className="text-amber-500 w-4 h-4" />
+             <h3 className="font-display font-bold text-white text-xs uppercase tracking-widest">IP 被墙状态手动管理</h3>
+          </div>
+          
+          <div className="flex flex-col sm:flex-row gap-3">
+            <input 
+              type="text" 
+              placeholder="请输入 IP 地址或域名，例如: 8.8.8.8"
+              value={gfwHost}
+              onChange={e => setGfwHost(e.target.value)}
+              className="flex-1 technical-input"
+            />
+            <div className="flex gap-2">
+              <button 
+                onClick={handleQueryStatus}
+                disabled={querying}
+                className="technical-button-outline py-2 px-4 text-xs whitespace-nowrap"
+              >
+                查询缓存
+              </button>
+              <button 
+                onClick={handleRunCheck}
+                disabled={querying}
+                className="technical-button-primary py-2 px-4 text-xs whitespace-nowrap"
+              >
+                {querying ? '检测中...' : '开始检测'}
+              </button>
+            </div>
+          </div>
+
+          {gfwResult && (
+            <div className="bg-black/40 border border-technical-border/50 p-4 rounded-sm space-y-2 text-xs font-mono">
+              <div className="flex justify-between">
+                <span className="text-technical-muted">目标主机:</span>
+                <span className="text-gray-300 font-bold">{gfwResult.host}</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-technical-muted">判定状态:</span>
+                {gfwResult.blocked === null ? (
+                  <span className="text-zinc-500">无缓存记录</span>
+                ) : gfwResult.blocked ? (
+                  <span className="text-red-500 bg-red-500/10 px-2 py-0.5 rounded border border-red-500/20 font-bold">已判定被墙</span>
+                ) : (
+                  <span className="text-green-500 bg-green-500/10 px-2 py-0.5 rounded border border-green-500/20 font-bold">判定正常</span>
+                )}
+              </div>
+              {gfwResult.updatedAt && (
+                <div className="flex justify-between">
+                  <span className="text-technical-muted">更新时间:</span>
+                  <span className="text-zinc-400">{new Date(gfwResult.updatedAt).toLocaleString('zh-CN')}</span>
+                </div>
+              )}
+            </div>
+          )}
+
+          <div className="pt-2 border-t border-technical-border/20 flex flex-wrap gap-2">
+            <button
+              onClick={() => handleManualUpdate(true)}
+              disabled={!gfwHost.trim() || savingGfw}
+              className="px-4 py-2 bg-red-950/40 hover:bg-red-900/40 border border-red-500/30 text-red-400 hover:text-red-300 rounded text-xs transition-colors flex-1 text-center"
+            >
+              手动标记为【被墙】
+            </button>
+            <button
+              onClick={() => handleManualUpdate(false)}
+              disabled={!gfwHost.trim() || savingGfw}
+              className="px-4 py-2 bg-green-950/40 hover:bg-green-900/40 border border-green-500/30 text-green-400 hover:text-green-300 rounded text-xs transition-colors flex-1 text-center"
+            >
+              手动标记为【正常】
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );

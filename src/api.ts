@@ -208,3 +208,20 @@ export const deleteLink = (id: string) =>
 
 export const buildSubUrl = (token: string) =>
   `${window.location.origin}/sub/${token}`;
+
+// ---------- GFW / IP status ----------
+
+export const checkGfwStatus = (host: string) =>
+  apiFetch<{ success: boolean; host: string; blocked: boolean | null; cached: boolean; updatedAt?: number }>(`/api/gfw/status?host=${encodeURIComponent(host)}`);
+
+export const runGfwCheck = (host: string) =>
+  apiFetch<{ success: boolean; host: string; blocked: boolean }>(`/api/gfw/check`, {
+    method: 'POST',
+    body: JSON.stringify({ host })
+  });
+
+export const updateGfwStatus = (host: string, blocked: boolean) =>
+  apiFetch<{ success: boolean; host: string; blocked: boolean }>(`/api/gfw/update`, {
+    method: 'POST',
+    body: JSON.stringify({ host, blocked })
+  });

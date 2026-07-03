@@ -811,6 +811,29 @@ async function handleAPI(request: Request, env: Env, pathname: string): Promise<
           const blocked = await checkIpBlocked(host, env);
           return ok({ success: true, host, blocked });
         }
+        if (method === 'GET' && id === 'status') {
+          const url = new URL(request.url);
+          const host = url.searchParams.get('host');
+          if (!host) return err('Missing host query parameter', 400);
+          const cacheKey = `gfw_status:${host}`;
+          const cached = await env.KV.get(cacheKey);
+          if (cached) {
+            const parsed = JSON.parse(cached);
+            return ok({ success: true, host, blocked: parsed.blocked, cached: true, updatedAt: parsed.updatedAt });
+          }
+          return ok({ success: true, host, blocked: null, cached: false });
+        }
+        if (method === 'POST' && id === 'update') {
+          const body: any = await request.json().catch(() => ({}));
+          const host = body.host || body.ip || body.server;
+          const blocked = body.blocked === true;
+          if (!host) return err('Missing host or ip or server in request body', 400);
+          const cacheKey = `gfw_status:${host}`;
+          await env.KV.put(cacheKey, JSON.stringify({ blocked, updatedAt: Date.now() }), {
+            expirationTtl: 24 * 3600
+          });
+          return ok({ success: true, host, blocked });
+        }
         return err404();
       case 'vps':
         if (method === 'POST' && id === 'ip-changed') {
@@ -2488,7 +2511,7 @@ async function checkIpBlocked(host: string, env: Env): Promise<boolean> {
         locations: [{ country: 'CN' }],
         limit: 2,
         measurementOptions: {
-          packets: 5
+          packets: 3
         }
       })
     });
@@ -2506,9 +2529,9 @@ async function checkIpBlocked(host: string, env: Env): Promise<boolean> {
     let blocked = false;
     let completed = false;
 
-    // 轮询 5 次，每次间隔 3 秒（限额 5 个包通常可在 5~8 秒内完成）
-    for (let i = 0; i < 5; i++) {
-      await new Promise(resolve => setTimeout(resolve, 3000));
+    // 轮询 8 次，每次间隔 1.5 秒（减少检测物理等待时间，大部分在 3-5 秒内即可完成）
+    for (let i = 0; i < 8; i++) {
+      await new Promise(resolve => setTimeout(resolve, 1500));
       const getRes = await fetch(`https://api.globalping.io/v1/measurements/${measurementId}`, {
         headers: {
           'User-Agent': 'MihomoManager/1.0'
