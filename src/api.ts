@@ -170,7 +170,7 @@ export const refreshSubscription = (id: string) =>
 export const refreshUrlEntry = (groupId: string, urlIndex: number) =>
   apiFetch<{ ok: boolean; url: string }>(`/api/subscriptions/${groupId}/urls/${urlIndex}/refresh`, { method:'POST' });
 export const getSubscriptionProxies = (id: string) =>
-  apiFetch<string[]>(`/api/subscriptions/${id}/proxies`);
+  apiFetch<{ name: string; server: string }[]>(`/api/subscriptions/${id}/proxies`);
 
 // ---------- Global URLs ----------
 

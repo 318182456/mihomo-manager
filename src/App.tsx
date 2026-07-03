@@ -359,66 +359,198 @@ function LoginView({ onLogin }: { onLogin: () => void }) {
   );
 }
 
+function SourceGfwChecker({ domain }: { domain: string }) {
+  const [status, setStatus] = useState<'unchecked' | 'checking' | 'blocked' | 'normal' | 'error'>('unchecked');
+  const [lastUpdated, setLastUpdated] = useState<number | undefined>(undefined);
+
+  const checkStatus = async (force: boolean) => {
+    setStatus('checking');
+    try {
+      if (force) {
+        const res = await api.runGfwCheck(domain);
+        setStatus(res.blocked ? 'blocked' : 'normal');
+        setLastUpdated(Date.now());
+      } else {
+        const res = await api.checkGfwStatus(domain);
+        if (res.blocked === null) {
+          setStatus('unchecked');
+        } else {
+          setStatus(res.blocked ? 'blocked' : 'normal');
+          setLastUpdated(res.updatedAt);
+        }
+      }
+    } catch {
+      setStatus('error');
+    }
+  };
+
+  const markStatus = async (blocked: boolean) => {
+    setStatus('checking');
+    try {
+      await api.updateGfwStatus(domain, blocked);
+      setStatus(blocked ? 'blocked' : 'normal');
+      setLastUpdated(Date.now());
+    } catch {
+      setStatus('error');
+    }
+  };
+
+  useEffect(() => {
+    checkStatus(false);
+  }, [domain]);
+
+  return (
+    <div className="pt-2.5 border-t border-technical-border/20 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-black/20 p-3 rounded-sm">
+      <div className="flex items-center gap-2">
+        <span className="text-[10px] font-display font-bold text-technical-muted uppercase tracking-widest">订阅域名状态 ({domain}) :</span>
+        {status === 'checking' && <span className="text-[10px] text-technical-cyan animate-pulse">检测中...</span>}
+        {status === 'unchecked' && <span className="text-[10px] text-zinc-500">未检测</span>}
+        {status === 'blocked' && <span className="px-1.5 py-0.5 bg-red-950/40 border border-red-500/30 text-[9px] font-bold text-red-400 rounded">被墙</span>}
+        {status === 'normal' && <span className="px-1.5 py-0.5 bg-green-950/40 border border-green-500/30 text-[9px] font-bold text-green-400 rounded">正常</span>}
+        {status === 'error' && <span className="text-[10px] text-red-500">检测出错</span>}
+        {status !== 'checking' && lastUpdated && (
+          <span className="text-[9px] text-zinc-600 font-mono">({new Date(lastUpdated).toLocaleTimeString()})</span>
+        )}
+      </div>
+      <div className="flex gap-2">
+        <button
+          onClick={() => checkStatus(true)}
+          disabled={status === 'checking'}
+          className="technical-button-outline py-0.5 px-2 text-[9px] h-6"
+        >
+          重新检测
+        </button>
+        <button
+          onClick={() => markStatus(true)}
+          disabled={status === 'checking'}
+          className="px-2 py-0.5 bg-red-900/10 hover:bg-red-900/20 border border-red-500/20 text-red-400 hover:text-red-300 rounded text-[9px] transition-colors h-6"
+        >
+          标记被墙
+        </button>
+        <button
+          onClick={() => markStatus(false)}
+          disabled={status === 'checking'}
+          className="px-2 py-0.5 bg-green-900/10 hover:bg-green-900/20 border border-green-500/20 text-green-400 hover:text-green-300 rounded text-[9px] transition-colors h-6"
+        >
+          标记正常
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ProxyNodeBadge({ proxy, filterPattern }: { proxy: { name: string; server: string }; filterPattern: string }) {
+  const [gfwStatus, setGfwStatus] = useState<'unchecked' | 'checking' | 'blocked' | 'normal' | 'error'>('unchecked');
+  const [showActions, setShowActions] = useState(false);
+
+  let isMatch = true;
+  try {
+    const pattern = filterPattern;
+    isMatch = !pattern || new RegExp(pattern).test(proxy.name);
+  } catch {
+    isMatch = false;
+  }
+
+  const checkStatus = async (force: boolean) => {
+    if (!proxy.server) return;
+    setGfwStatus('checking');
+    try {
+      if (force) {
+        const res = await api.runGfwCheck(proxy.server);
+        setGfwStatus(res.blocked ? 'blocked' : 'normal');
+      } else {
+        const res = await api.checkGfwStatus(proxy.server);
+        if (res.blocked === null) {
+          setGfwStatus('unchecked');
+        } else {
+          setGfwStatus(res.blocked ? 'blocked' : 'normal');
+        }
+      }
+    } catch {
+      setGfwStatus('error');
+    }
+  };
+
+  const markStatus = async (blocked: boolean) => {
+    if (!proxy.server) return;
+    setGfwStatus('checking');
+    try {
+      await api.updateGfwStatus(proxy.server, blocked);
+      setGfwStatus(blocked ? 'blocked' : 'normal');
+    } catch {
+      setGfwStatus('error');
+    }
+  };
+
+  useEffect(() => {
+    if (proxy.server) {
+      checkStatus(false);
+    }
+  }, [proxy.server]);
+
+  return (
+    <div className="relative inline-flex items-center gap-1">
+      <button
+        onClick={() => setShowActions(!showActions)}
+        className={`px-1.5 py-0.5 rounded-sm text-[10px] flex items-center gap-1.5 transition-all ${
+          isMatch 
+            ? 'bg-technical-cyan/10 text-technical-cyan border border-technical-cyan/20 hover:bg-technical-cyan/20' 
+            : 'bg-zinc-800/40 text-zinc-500 line-through border border-transparent'
+        }`}
+      >
+        <span>{proxy.name}</span>
+        {proxy.server && (
+          <span className="text-[9px] opacity-40 font-mono no-underline max-w-[85px] truncate">({proxy.server})</span>
+        )}
+        
+        {proxy.server && (
+          <span className={`w-1.5 h-1.5 rounded-full ${
+            gfwStatus === 'checking' ? 'bg-technical-cyan animate-pulse' :
+            gfwStatus === 'blocked' ? 'bg-red-500 shadow-[0_0_4px_rgba(239,68,68,0.5)]' :
+            gfwStatus === 'normal' ? 'bg-green-500' :
+            'bg-zinc-600'
+          }`} />
+        )}
+      </button>
+
+      {showActions && proxy.server && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setShowActions(false)} />
+          <div className="absolute bottom-full left-0 mb-1 bg-zinc-950 border border-technical-border rounded-sm shadow-xl p-2 z-50 flex flex-col gap-1.5 min-w-[200px] text-xs font-sans">
+            <div className="text-[9px] font-mono text-zinc-500 border-b border-technical-border/30 pb-1 mb-1 truncate">
+              {proxy.server}
+            </div>
+            <button
+              onClick={() => { checkStatus(true); setShowActions(false); }}
+              className="text-left text-[10px] text-technical-cyan hover:bg-technical-cyan/10 px-1.5 py-1 rounded"
+            >
+              🔍 开始检测被墙状态
+            </button>
+            <button
+              onClick={() => { markStatus(true); setShowActions(false); }}
+              className="text-left text-[10px] text-red-400 hover:bg-red-500/10 px-1.5 py-1 rounded"
+            >
+              🚫 手动标记为【被墙】
+            </button>
+            <button
+              onClick={() => { markStatus(false); setShowActions(false); }}
+              className="text-left text-[10px] text-green-400 hover:bg-green-500/10 px-1.5 py-1 rounded"
+            >
+              ✅ 手动标记为【正常】
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 function DashboardView() {
   const [stats, setStats] = useState<api.DashboardStats | null>(null);
-  const [gfwHost, setGfwHost] = useState('');
-  const [querying, setQuerying] = useState(false);
-  const [savingGfw, setSavingGfw] = useState(false);
-  const [gfwResult, setGfwResult] = useState<{ host: string; blocked: boolean | null; cached: boolean; updatedAt?: number } | null>(null);
 
   useEffect(() => {
     api.getDashboard().then(setStats).catch(console.error);
   }, []);
-
-  const handleQueryStatus = async () => {
-    if (!gfwHost.trim()) return alert('请输入 IP 或域名');
-    setQuerying(true);
-    try {
-      const res = await api.checkGfwStatus(gfwHost.trim());
-      setGfwResult(res);
-    } catch (e: any) {
-      alert('查询失败: ' + (e.message || e));
-    } finally {
-      setQuerying(false);
-    }
-  };
-
-  const handleRunCheck = async () => {
-    if (!gfwHost.trim()) return alert('请输入 IP 或域名');
-    setQuerying(true);
-    try {
-      const res = await api.runGfwCheck(gfwHost.trim());
-      setGfwResult({
-        host: res.host,
-        blocked: res.blocked,
-        cached: true,
-        updatedAt: Date.now()
-      });
-    } catch (e: any) {
-      alert('检测失败: ' + (e.message || e));
-    } finally {
-      setQuerying(false);
-    }
-  };
-
-  const handleManualUpdate = async (blocked: boolean) => {
-    if (!gfwHost.trim()) return alert('请输入 IP 或域名');
-    setSavingGfw(true);
-    try {
-      const res = await api.updateGfwStatus(gfwHost.trim(), blocked);
-      setGfwResult({
-        host: res.host,
-        blocked: res.blocked,
-        cached: true,
-        updatedAt: Date.now()
-      });
-      alert(`手动标记成功，当前状态：${blocked ? '已判定被墙' : '判定正常'}`);
-    } catch (e: any) {
-      alert('标记失败: ' + (e.message || e));
-    } finally {
-      setSavingGfw(false);
-    }
-  };
 
   const metrics = [
     { label: '活动订阅', value: stats?.activeSubscriptions ?? '-', total: stats?.totalSubscriptions, icon: Rss, color: 'text-technical-cyan' },
@@ -463,83 +595,6 @@ function DashboardView() {
           </div>
         ))}
       </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="technical-card p-6 lg:col-span-2 space-y-4">
-          <div className="flex items-center gap-2 border-b border-technical-border/30 pb-3">
-             <AlertTriangle className="text-amber-500 w-4 h-4" />
-             <h3 className="font-display font-bold text-white text-xs uppercase tracking-widest">IP 被墙状态手动管理</h3>
-          </div>
-          
-          <div className="flex flex-col sm:flex-row gap-3">
-            <input 
-              type="text" 
-              placeholder="请输入 IP 地址或域名，例如: 8.8.8.8"
-              value={gfwHost}
-              onChange={e => setGfwHost(e.target.value)}
-              className="flex-1 technical-input"
-            />
-            <div className="flex gap-2">
-              <button 
-                onClick={handleQueryStatus}
-                disabled={querying}
-                className="technical-button-outline py-2 px-4 text-xs whitespace-nowrap"
-              >
-                查询缓存
-              </button>
-              <button 
-                onClick={handleRunCheck}
-                disabled={querying}
-                className="technical-button-primary py-2 px-4 text-xs whitespace-nowrap"
-              >
-                {querying ? '检测中...' : '开始检测'}
-              </button>
-            </div>
-          </div>
-
-          {gfwResult && (
-            <div className="bg-black/40 border border-technical-border/50 p-4 rounded-sm space-y-2 text-xs font-mono">
-              <div className="flex justify-between">
-                <span className="text-technical-muted">目标主机:</span>
-                <span className="text-gray-300 font-bold">{gfwResult.host}</span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-technical-muted">判定状态:</span>
-                {gfwResult.blocked === null ? (
-                  <span className="text-zinc-500">无缓存记录</span>
-                ) : gfwResult.blocked ? (
-                  <span className="text-red-500 bg-red-500/10 px-2 py-0.5 rounded border border-red-500/20 font-bold">已判定被墙</span>
-                ) : (
-                  <span className="text-green-500 bg-green-500/10 px-2 py-0.5 rounded border border-green-500/20 font-bold">判定正常</span>
-                )}
-              </div>
-              {gfwResult.updatedAt && (
-                <div className="flex justify-between">
-                  <span className="text-technical-muted">更新时间:</span>
-                  <span className="text-zinc-400">{new Date(gfwResult.updatedAt).toLocaleString('zh-CN')}</span>
-                </div>
-              )}
-            </div>
-          )}
-
-          <div className="pt-2 border-t border-technical-border/20 flex flex-wrap gap-2">
-            <button
-              onClick={() => handleManualUpdate(true)}
-              disabled={!gfwHost.trim() || savingGfw}
-              className="px-4 py-2 bg-red-950/40 hover:bg-red-900/40 border border-red-500/30 text-red-400 hover:text-red-300 rounded text-xs transition-colors flex-1 text-center"
-            >
-              手动标记为【被墙】
-            </button>
-            <button
-              onClick={() => handleManualUpdate(false)}
-              disabled={!gfwHost.trim() || savingGfw}
-              className="px-4 py-2 bg-green-950/40 hover:bg-green-900/40 border border-green-500/30 text-green-400 hover:text-green-300 rounded text-xs transition-colors flex-1 text-center"
-            >
-              手动标记为【正常】
-            </button>
-          </div>
-        </div>
-      </div>
     </div>
   );
 }
@@ -556,7 +611,7 @@ function SubscriptionsView() {
   const [refreshingKey, setRefreshingKey] = useState<string | null>(null);
   const [urlMsg, setUrlMsg] = useState<{ key: string; ok: boolean; text: string } | null>(null);
 
-  const [proxyCache, setProxyCache] = useState<Record<string, string[]>>({});
+  const [proxyCache, setProxyCache] = useState<Record<string, { name: string; server: string }[]>>({});
   const [loadingProxies, setLoadingProxies] = useState<Record<string, boolean>>({});
 
   const [dragInfo, setDragInfo] = useState<{ groupId: string; index: number } | null>(null);
@@ -565,8 +620,8 @@ function SubscriptionsView() {
   const handleFetchProxies = async (groupId: string) => {
     setLoadingProxies(prev => ({ ...prev, [groupId]: true }));
     try {
-      const names = await api.getSubscriptionProxies(groupId);
-      setProxyCache(prev => ({ ...prev, [groupId]: names }));
+      const proxies = await api.getSubscriptionProxies(groupId);
+      setProxyCache(prev => ({ ...prev, [groupId]: proxies }));
     } catch (e) {
       alert('获取代理节点失败');
     } finally {
@@ -916,27 +971,16 @@ function SubscriptionsView() {
                         已过滤出 {proxyCache[group.id].filter(p => {
                           try { 
                             const pattern = compileFilter(group.filter);
-                            return !pattern || new RegExp(pattern).test(p); 
+                            return !pattern || new RegExp(pattern).test(p.name); 
                           }
                           catch { return false; }
                         }).length} 个
                       </span>
                     </div>
                     <div className="flex flex-wrap gap-1.5">
-                      {proxyCache[group.id].map((p, idx) => {
-                        let isMatch = true;
-                        try {
-                          const pattern = compileFilter(group.filter);
-                          isMatch = !pattern || new RegExp(pattern).test(p);
-                        } catch {
-                          isMatch = false;
-                        }
-                        return (
-                          <span key={idx} className={`px-1.5 py-0.5 rounded-sm text-[10px] ${isMatch ? 'bg-technical-cyan/20 text-technical-cyan border border-technical-cyan/30' : 'bg-zinc-800 text-zinc-500 line-through border border-transparent'}`}>
-                            {p}
-                          </span>
-                        );
-                      })}
+                      {proxyCache[group.id].map((p, idx) => (
+                        <ProxyNodeBadge key={idx} proxy={p} filterPattern={compileFilter(group.filter)} />
+                      ))}
                     </div>
                   </div>
                 )}
@@ -1695,6 +1739,15 @@ function SubscriptionsView() {
                         </label>
                       </div>
                     </div>
+
+                    {(() => {
+                      let domain = '';
+                      try {
+                        domain = new URL(source.url.split(/[\s,;|]+/)[0]).hostname;
+                      } catch {}
+                      if (!domain) return null;
+                      return <SourceGfwChecker domain={domain} />;
+                    })()}
 
                     <div className="flex items-center gap-3 pt-1">
                       <button

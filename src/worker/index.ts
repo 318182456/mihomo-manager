@@ -1095,12 +1095,14 @@ async function handleSubscriptionProxies(id: string, kv: KVNamespace): Promise<R
         } catch (e) { /* 忽略解析错误 */ }
       }
       for (const p of parsed) {
-        if (p && p.name) proxies.add(p.name);
+        if (p && p.name) {
+          proxies.add(JSON.stringify({ name: p.name, server: p.server || '' }));
+        }
       }
     }
   }
 
-  return ok(Array.from(proxies));
+  return ok(Array.from(proxies).map(s => JSON.parse(s)));
 }
 
 // ---------- 兼容：刷新订阅组内的单个 URL ----------
