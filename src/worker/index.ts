@@ -1928,7 +1928,7 @@ async function fetchProxiesFromGroup(
 
         // 直接使用域名连接
         const cloned = JSON.parse(JSON.stringify(p));
-        cloned.name = `${p.name} - Gcore域名`;
+        cloned.name = p.name;
         cloned.server = hostDomain;
         cloned.tls = true;
         cloned.port = 443;
