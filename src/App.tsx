@@ -1529,6 +1529,42 @@ function SubscriptionsView() {
                       )}
                     </div>
 
+                    {/* Gcore 域名连接配置 */}
+                    <div className="pt-2 border-t border-technical-border/20 space-y-3">
+                      <label className="block text-[10px] font-display font-bold text-technical-cyan uppercase tracking-widest">
+                        Gcore 域名连接配置 (直接将 Gcore 节点 server 指向其 CDN 域名连接)
+                      </label>
+                      
+                      <div className="flex flex-col sm:flex-row sm:items-center gap-4 bg-black/20 p-3 rounded-sm border border-technical-border/30">
+                        <label className="flex items-center gap-2 text-[11px] text-technical-muted cursor-pointer select-none">
+                          <input
+                            type="checkbox"
+                            checked={source.gcoreOptimize ?? false}
+                            onChange={(e) => {
+                              setGlobalUrls(globalUrls.map(u => u.id === source.id ? { ...u, gcoreOptimize: e.target.checked } : u));
+                              handleUpdateSource(source.id, { gcoreOptimize: e.target.checked });
+                            }}
+                            className="bg-black/40 border border-technical-border rounded-sm text-technical-cyan focus:ring-0 outline-none w-3.5 h-3.5"
+                          />
+                          <span className={source.gcoreOptimize ? 'text-technical-cyan font-bold' : ''}>启用 Gcore 域名连接</span>
+                        </label>
+
+                        <label className={`flex items-center gap-2 text-[11px] text-technical-muted select-none ${source.gcoreOptimize ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'}`}>
+                          <input
+                            type="checkbox"
+                            disabled={!source.gcoreOptimize}
+                            checked={source.gcoreOptimizeHideOriginal ?? false}
+                            onChange={(e) => {
+                              setGlobalUrls(globalUrls.map(u => u.id === source.id ? { ...u, gcoreOptimizeHideOriginal: e.target.checked } : u));
+                              handleUpdateSource(source.id, { gcoreOptimizeHideOriginal: e.target.checked });
+                            }}
+                            className="bg-black/40 border border-technical-border rounded-sm text-technical-cyan focus:ring-0 outline-none w-3.5 h-3.5"
+                          />
+                          <span>隐藏原节点</span>
+                        </label>
+                      </div>
+                    </div>
+
                     <div className="flex items-center gap-3 pt-1">
                       <button
                         onClick={() => handleSourceRefresh(source.id)}

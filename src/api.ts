@@ -31,6 +31,13 @@ export interface UrlEntry {
   cfOptimizeHideOriginal?: boolean;
   cfOptimizeDomain?: string;
   cfOptimizeType?: 'api' | 'custom';
+  gcoreOptimize?: boolean;
+  gcoreOptimizeNum?: number;
+  gcoreOptimizeOnlyCdn?: boolean;
+  gcoreOptimizeHideOriginal?: boolean;
+  gcoreOptimizeDomain?: string;
+  gcoreOptimizeType?: 'api' | 'custom';
+  gcoreOptimizeIsp?: string;
   simplifyNames?: boolean;
   onlyCdnAtNight?: boolean;
   cfOptimizeIsp?: string;

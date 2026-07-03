@@ -193,6 +193,13 @@ export interface UrlEntry {
   cfOptimizeHideOriginal?: boolean;
   cfOptimizeDomain?: string;
   cfOptimizeType?: 'api' | 'custom';
+  gcoreOptimize?: boolean;
+  gcoreOptimizeNum?: number;
+  gcoreOptimizeOnlyCdn?: boolean;
+  gcoreOptimizeHideOriginal?: boolean;
+  gcoreOptimizeDomain?: string;
+  gcoreOptimizeType?: 'api' | 'custom';
+  gcoreOptimizeIsp?: string;
   simplifyNames?: boolean;
   onlyCdnAtNight?: boolean;
   cfOptimizeIsp?: string;
@@ -1894,7 +1901,10 @@ async function fetchProxiesFromGroup(
           delete p.flow;
         }
       }
-      const isCdn = p.name.toLowerCase().includes('cdn');
+      const isGcore = p.name.toLowerCase().includes('gcore') || 
+                      (p.servername || p.sni || p.server || '').toLowerCase().includes('gcore') ||
+                      (p['ws-opts']?.headers?.Host || p['ws-opts']?.headers?.host || '').toLowerCase().includes('gcore');
+      const isCdn = p.name.toLowerCase().includes('cdn') || isGcore;
       if (p.type === 'hysteria2') {
         if (entry.hysteria2Up) p.up = entry.hysteria2Up;
         if (entry.hysteria2Down) p.down = entry.hysteria2Down;
@@ -1902,6 +1912,41 @@ async function fetchProxiesFromGroup(
       }
 
       if (isNight && !isCdn) {
+        continue;
+      }
+
+      if (entry.gcoreOptimize && isGcore) {
+        const originalServer = p.server;
+        const hostDomain = p.servername || p.sni || p['ws-opts']?.headers?.Host || p['ws-opts']?.headers?.host || originalServer;
+
+        const isBlocked = gfwStatusMap.get(originalServer) || false;
+
+        // 保留原节点
+        if (!entry.gcoreOptimizeHideOriginal && !isBlocked) {
+          proxies.push(p);
+        }
+
+        // 直接使用域名连接
+        const cloned = JSON.parse(JSON.stringify(p));
+        cloned.name = `${p.name} - Gcore域名`;
+        cloned.server = hostDomain;
+        cloned.tls = true;
+        cloned.port = 443;
+
+        // 保持 SNI
+        if (!cloned.sni) cloned.sni = hostDomain;
+        if (!cloned.servername) cloned.servername = hostDomain;
+
+        // 对于 ws 传输，保持 Host
+        if (cloned.network === 'ws' || cloned.type === 'vmess') {
+          if (!cloned['ws-opts']) cloned['ws-opts'] = { path: '/' };
+          if (!cloned['ws-opts'].headers) cloned['ws-opts'].headers = {};
+          if (!cloned['ws-opts'].headers.Host && !cloned['ws-opts'].headers.host) {
+            cloned['ws-opts'].headers.Host = hostDomain;
+          }
+        }
+
+        proxies.push(cloned);
         continue;
       }
 
