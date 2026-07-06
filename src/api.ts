@@ -225,3 +225,12 @@ export const updateGfwStatus = (host: string, blocked: boolean) =>
     method: 'POST',
     body: JSON.stringify({ host, blocked })
   });
+
+// ---------- Gcore ----------
+
+export const getGcoreOptimizedIps = () =>
+  apiFetch<any[]>('/api/gcore/optimized-ips');
+
+export const runGcoreSpeedtest = () =>
+  apiFetch<{ success: boolean; message: string }>('/api/gcore/speedtest', { method: 'POST' });
+

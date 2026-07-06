@@ -577,6 +577,9 @@ export default {
 
     await env.KV.put('subscription_urls', JSON.stringify(globalUrls));
     console.log(`[Cron] 定时任务执行完毕: 成功 ${successCount}, 失败 ${failCount}`);
+
+    // 异步执行 Gcore 优选 IP 测速更新
+    _ctx.waitUntil(runGcoreSpeedtest(env).catch(e => console.error('[Gcore Cron] 测速更新异常:', e)));
   },
 
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -604,7 +607,7 @@ export default {
         const kid = pathname.split('/').pop()!;
         return handlePasskeyDelete(kid, env);
       }
-      return handleAPI(request, env, pathname);
+      return handleAPI(request, env, pathname, ctx);
     }
 
     return env.ASSETS.fetch(request);
@@ -768,7 +771,7 @@ async function handlePasskeyLoginFinish(request: Request, env: Env): Promise<Res
 
 // ---------- API 路由 ----------
 
-async function handleAPI(request: Request, env: Env, pathname: string): Promise<Response> {
+async function handleAPI(request: Request, env: Env, pathname: string, ctx: ExecutionContext): Promise<Response> {
   const parts = pathname.replace(/^\/api\//, '').split('/');
   const [resource, id = null] = parts;
   const method = request.method;
@@ -836,6 +839,16 @@ async function handleAPI(request: Request, env: Env, pathname: string): Promise<
             expirationTtl: 24 * 3600
           });
           return ok({ success: true, host, ip, blocked });
+        }
+        return err404();
+      case 'gcore':
+        if (method === 'POST' && id === 'speedtest') {
+          ctx.waitUntil(runGcoreSpeedtest(env).catch(e => console.error('Gcore speedtest error:', e)));
+          return ok({ success: true, message: 'Gcore 优选 IP 测速任务已在后台启动' });
+        }
+        if (method === 'GET' && id === 'optimized-ips') {
+          const val = await env.KV.get('gcore_optimized_ips');
+          return ok(val ? JSON.parse(val) : []);
         }
         return err404();
       case 'vps':
@@ -993,6 +1006,7 @@ async function handleUrlCacheSync(id: string, env: Env): Promise<Response> {
     
     return ok({ ok: true, msg: '同步缓存成功' });
   } catch (e) {
+    console.error(`[SyncCache] 同步上游订阅失败 (ID: ${id}):`, e);
     return err(`同步上游订阅失败: ${String(e)}`, 502);
   }
 }
@@ -1365,7 +1379,7 @@ async function updateSubscriptionCache(
       });
       clearTimeout(id);
       if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
+        throw new Error(`HTTP ${response.status} (${response.statusText || 'No status text'})`);
       }
       const text = await response.text();
       const info = response.headers.get('subscription-userinfo') || response.headers.get('Subscription-Userinfo') || '';
@@ -1956,12 +1970,40 @@ async function fetchProxiesFromGroup(
 
         // 获取优选列表
         let targets: { ip: string; isp: string }[] = [];
-        if (entry.gcoreOptimizeDomain) {
+        const useCustom = entry.gcoreOptimizeType === 'custom' || (!entry.gcoreOptimizeType && entry.gcoreOptimizeDomain);
+        
+        if (useCustom && entry.gcoreOptimizeDomain) {
           const customList = entry.gcoreOptimizeDomain.split(/[,，\s]+/).map(x => x.trim()).filter(Boolean);
           targets = customList.map((val, idx) => ({
             ip: val,
             isp: customList.length === 1 ? 'Gcore优选' : `Gcore优选 ${idx + 1}`
           }));
+        } else {
+          // 系统测速 IP 模式 (api)
+          const limit = entry.gcoreOptimizeNum || 3;
+          try {
+            const rawCached = await env.KV.get('gcore_optimized_ips');
+            if (rawCached) {
+              const cachedList = JSON.parse(rawCached) as GcoreTestResult[];
+              const okIps = cachedList.filter(x => x.loss < 100).slice(0, limit);
+              targets = okIps.map((x, idx) => ({
+                ip: x.ip,
+                isp: `Gcore优选 ${idx + 1} (${x.latency}ms)`
+              }));
+            }
+          } catch (e) {
+            console.error('[Gcore Optimize] 读取优选 IP 缓存失败:', e);
+          }
+
+          // 兜底：若缓存为空或无有效IP，使用一组高质量 Asian Gcore IP
+          if (targets.length === 0) {
+            const defaultList = ['92.223.63.11', '92.223.63.22', '92.223.63.29', '92.223.76.22', '92.223.78.26'];
+            const sel = defaultList.slice(0, limit);
+            targets = sel.map((ip, idx) => ({
+              ip,
+              isp: `Gcore默认 ${idx + 1}`
+            }));
+          }
         }
 
         if (targets.length > 0) {
@@ -2632,4 +2674,116 @@ async function resolveDomainToIp(host: string): Promise<string> {
   }
   return host;
 }
+
+interface GcoreTestResult {
+  ip: string;
+  latency: number;
+  loss: number;
+  updatedAt: number;
+}
+
+async function runGcoreSpeedtest(env: Env): Promise<void> {
+  const candidates = [
+    '92.223.63.11', '92.223.63.22', '92.223.63.23', '92.223.63.25', '92.223.63.29', // Tokyo
+    '92.223.76.22', '92.223.76.27', '92.223.76.132', '92.223.76.136', // HK
+    '92.223.78.25', '92.223.78.26', '92.223.78.27' // Singapore
+  ];
+
+  console.log(`[Gcore Cron] 开始对 ${candidates.length} 个 Gcore 候选 IP 进行延迟与被墙检测...`);
+
+  const triggerMeasurement = async (ip: string) => {
+    try {
+      const res = await fetch('https://api.globalping.io/v1/measurements', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'User-Agent': 'MihomoManager/1.0'
+        },
+        body: JSON.stringify({
+          type: 'ping',
+          target: ip,
+          locations: [{ country: 'CN' }],
+          limit: 2,
+          measurementOptions: { packets: 3 }
+        })
+      });
+      if (!res.ok) return null;
+      const json = await res.json() as any;
+      return { ip, id: json.id };
+    } catch (e) {
+      console.error(`[Gcore Cron] 触发 IP ${ip} 检测失败:`, e);
+      return null;
+    }
+  };
+
+  const activeJobs = (await Promise.all(candidates.map(ip => triggerMeasurement(ip)))).filter(Boolean) as { ip: string; id: string }[];
+  if (activeJobs.length === 0) {
+    console.error('[Gcore Cron] 未成功触发任何检测任务');
+    return;
+  }
+
+  // 轮询获取结果
+  const results: GcoreTestResult[] = [];
+  const start = Date.now();
+  
+  for (let step = 0; step < 10; step++) {
+    if (results.length === activeJobs.length || Date.now() - start > 25000) {
+      break;
+    }
+    await new Promise(resolve => setTimeout(resolve, 2000));
+
+    for (const job of activeJobs) {
+      if (results.some(r => r.ip === job.ip)) continue;
+
+      try {
+        const getRes = await fetch(`https://api.globalping.io/v1/measurements/${job.id}`, {
+          headers: { 'User-Agent': 'MihomoManager/1.0' }
+        });
+        if (!getRes.ok) continue;
+        const getJson = await getRes.json() as any;
+        if (getJson.status === 'finished') {
+          const probeResults = getJson.results || [];
+          let totalLatency = 0;
+          let totalLoss = 0;
+          let count = 0;
+
+          for (const r of probeResults) {
+            if (r.result && r.result.stats) {
+              const stats = r.result.stats;
+              totalLatency += stats.avg || 999;
+              totalLoss += stats.loss || 0;
+              count++;
+            }
+          }
+
+          const avgLatency = count > 0 ? totalLatency / count : 999;
+          const avgLoss = count > 0 ? totalLoss / count : 100;
+
+          results.push({
+            ip: job.ip,
+            latency: Math.round(avgLatency),
+            loss: Math.round(avgLoss),
+            updatedAt: Date.now()
+          });
+          console.log(`[Gcore Cron] IP ${job.ip} 检测完成: 延迟=${Math.round(avgLatency)}ms, 丢包=${Math.round(avgLoss)}%`);
+        }
+      } catch (e) {
+        console.error(`[Gcore Cron] 获取 IP ${job.ip} 结果异常:`, e);
+      }
+    }
+  }
+
+  results.sort((a, b) => {
+    if (a.loss !== b.loss) return a.loss - b.loss;
+    return a.latency - b.latency;
+  });
+
+  if (results.length > 0) {
+    await env.KV.put('gcore_optimized_ips', JSON.stringify(results));
+    console.log(`[Gcore Cron] 成功保存 ${results.length} 个 Gcore 优选 IP`);
+  } else {
+    console.warn('[Gcore Cron] 未获得任何有效测试结果');
+  }
+}
+
 

@@ -627,6 +627,36 @@ function SubscriptionsView() {
   const [dragInfo, setDragInfo] = useState<{ groupId: string; index: number } | null>(null);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
 
+  const [gcoreSpeedtesting, setGcoreSpeedtesting] = useState(false);
+  const [gcoreIps, setGcoreIps] = useState<any[]>([]);
+  const [showGcoreIps, setShowGcoreIps] = useState(false);
+
+  const handleGcoreSpeedtest = async () => {
+    setGcoreSpeedtesting(true);
+    try {
+      const res = await api.runGcoreSpeedtest();
+      alert(res.message || '测速任务已在后台启动，系统将在 5 秒后尝试刷新列表');
+      setTimeout(async () => {
+        const ips = await api.getGcoreOptimizedIps().catch(() => []);
+        setGcoreIps(ips);
+      }, 5000);
+    } catch (e: any) {
+      alert(e.message || '测速启动失败');
+    } finally {
+      setGcoreSpeedtesting(false);
+    }
+  };
+
+  const handleFetchGcoreIps = async () => {
+    try {
+      const ips = await api.getGcoreOptimizedIps();
+      setGcoreIps(ips);
+      setShowGcoreIps(!showGcoreIps);
+    } catch {
+      alert('获取 Gcore 优选 IP 失败');
+    }
+  };
+
   const handleFetchProxies = async (groupId: string) => {
     setLoadingProxies(prev => ({ ...prev, [groupId]: true }));
     try {
@@ -665,12 +695,14 @@ function SubscriptionsView() {
 
   const loadData = async () => {
     try {
-      const [subs, urls] = await Promise.all([
+      const [subs, urls, ips] = await Promise.all([
         api.getSubscriptions(),
-        api.getUrls()
+        api.getUrls(),
+        api.getGcoreOptimizedIps().catch(() => [])
       ]);
       setGroups(subs);
       setGlobalUrls(urls);
+      setGcoreIps(ips);
     }
     catch (e) { console.error(e); }
     finally { setLoading(false); }
@@ -821,10 +853,25 @@ function SubscriptionsView() {
           </button>
         ) : (
           <div className="flex gap-2">
-            <button className="technical-button-outline border-technical-cyan/30 text-technical-cyan hover:bg-technical-cyan/5" onClick={handleImportUrls}>
+            <button 
+              className="technical-button-outline border-technical-cyan/30 text-technical-cyan hover:bg-technical-cyan/5 gap-1.5"
+              onClick={handleFetchGcoreIps}
+            >
+              <Activity size={14} />
+              <span>Gcore 优选 IP ({gcoreIps.length || 0})</span>
+            </button>
+            <button 
+              className="technical-button-outline border-technical-cyan/30 text-technical-cyan hover:bg-technical-cyan/5 gap-1.5"
+              onClick={handleGcoreSpeedtest}
+              disabled={gcoreSpeedtesting}
+            >
+              <RefreshCw size={14} className={gcoreSpeedtesting ? 'animate-spin' : ''} />
+              <span>{gcoreSpeedtesting ? '测速中...' : 'Gcore 测速'}</span>
+            </button>
+            <button className="technical-button-outline border-technical-cyan/30 text-technical-cyan hover:bg-technical-cyan/5 gap-1.5" onClick={handleImportUrls}>
               <LogIn size={14} /><span>导入 URL</span>
             </button>
-            <button className="technical-button-primary" onClick={handleAddSource}>
+            <button className="technical-button-primary gap-1.5" onClick={handleAddSource}>
               <Plus size={14} /><span>添加订阅源</span>
             </button>
           </div>
@@ -1156,6 +1203,41 @@ function SubscriptionsView() {
         </div>
       ) : (
         <div className="space-y-6 animate-fadeIn">
+          {showGcoreIps && (
+            <div className="technical-card p-4 space-y-3 animate-fadeIn border border-technical-cyan/30 bg-black/40">
+              <div className="flex justify-between items-center border-b border-technical-border pb-2">
+                <span className="text-xs font-display font-bold text-technical-cyan uppercase tracking-widest">
+                  Gcore 优选 IP 库 (来自后台定时/手动测速)
+                </span>
+                <button onClick={() => setShowGcoreIps(false)} className="text-technical-muted hover:text-white text-xs border-none bg-transparent outline-none cursor-pointer">
+                  收起
+                </button>
+              </div>
+              {gcoreIps.length === 0 ? (
+                <p className="text-xs text-technical-muted py-2">暂无测速记录，请点击上方“Gcore 测速”开始。</p>
+              ) : (
+                <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-3">
+                  {gcoreIps.map((x: any, idx: number) => (
+                    <div key={idx} className="bg-zinc-950 p-2.5 border border-technical-border rounded-sm flex flex-col gap-1 font-mono text-[10px]">
+                      <div className="text-gray-300 font-bold">{x.ip}</div>
+                      <div className="flex justify-between text-technical-muted">
+                        <span>延迟:</span>
+                        <span className={x.latency < 100 ? 'text-green-400 font-bold' : x.latency < 200 ? 'text-yellow-500' : 'text-red-500'}>
+                          {x.latency}ms
+                        </span>
+                      </div>
+                      <div className="flex justify-between text-technical-muted">
+                        <span>丢包:</span>
+                        <span className={x.loss === 0 ? 'text-green-400 font-bold' : 'text-red-500'}>
+                          {x.loss}%
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
           {globalUrls.map((source) => {
             const key = `source-${source.id}`;
             const isExpanded = expandedKey === key;
@@ -1751,23 +1833,83 @@ function SubscriptionsView() {
 
                       {source.gcoreOptimize && (
                         <div className="space-y-3 p-3 bg-zinc-950 border border-technical-border/40 rounded-sm animate-fadeIn">
-                          <div className="animate-fadeIn">
-                            <label className="block text-[9px] font-display text-technical-muted uppercase tracking-widest mb-1">
-                              自定义 Gcore 优选域名/IP（以逗号/空格分隔，不填则默认直接使用域名连接）
-                            </label>
-                            <input
-                              type="text"
-                              value={source.gcoreOptimizeDomain ?? ''}
-                              onChange={(e) => {
-                                setGlobalUrls(globalUrls.map(u => u.id === source.id ? { ...u, gcoreOptimizeDomain: e.target.value } : u));
-                              }}
-                              onBlur={(e) => {
-                                handleUpdateSource(source.id, { gcoreOptimizeDomain: e.target.value.trim() });
-                              }}
-                              placeholder="输入域名或 IP 列表，如: Seoul-node.gcdn.co, 1.2.3.4"
-                              className="w-full bg-black/40 border border-technical-border rounded-sm px-2.5 py-1.5 font-mono text-xs text-gray-300 focus:outline-none focus:border-technical-cyan/50"
-                            />
+                          {/* Segmented Control */}
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] font-display text-technical-muted uppercase tracking-widest shrink-0">优化模式:</span>
+                            <div className="flex gap-1 bg-black/40 p-0.5 border border-technical-border rounded-sm shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setGlobalUrls(globalUrls.map(u => u.id === source.id ? { ...u, gcoreOptimizeType: 'api' } : u));
+                                  handleUpdateSource(source.id, { gcoreOptimizeType: 'api' });
+                                }}
+                                className={`px-3 py-1 text-[11px] rounded-sm transition-all ${
+                                  (source.gcoreOptimizeType ?? 'api') === 'api'
+                                    ? 'bg-technical-cyan text-black font-bold'
+                                    : 'text-technical-muted hover:text-white'
+                                }`}
+                              >
+                                系统测速 IP
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setGlobalUrls(globalUrls.map(u => u.id === source.id ? { ...u, gcoreOptimizeType: 'custom' } : u));
+                                  handleUpdateSource(source.id, { gcoreOptimizeType: 'custom' });
+                                }}
+                                className={`px-3 py-1 text-[11px] rounded-sm transition-all ${
+                                  source.gcoreOptimizeType === 'custom'
+                                    ? 'bg-technical-cyan text-black font-bold'
+                                    : 'text-technical-muted hover:text-white'
+                                }`}
+                              >
+                                自定义域名 / IP
+                              </button>
+                            </div>
                           </div>
+
+                          {/* Dynamic Inputs */}
+                          {(source.gcoreOptimizeType ?? 'api') === 'api' ? (
+                            <div className="animate-fadeIn space-y-3">
+                              <div>
+                                <label className="block text-[9px] font-display text-technical-muted uppercase tracking-widest mb-1">优选 IP 节点数量</label>
+                                <input
+                                  type="number"
+                                  min={1}
+                                  max={20}
+                                  value={source.gcoreOptimizeNum ?? ''}
+                                  onChange={(e) => {
+                                    const val = e.target.value ? parseInt(e.target.value, 10) : undefined;
+                                    setGlobalUrls(globalUrls.map(u => u.id === source.id ? { ...u, gcoreOptimizeNum: val } : u));
+                                  }}
+                                  onBlur={(e) => {
+                                    const val = e.target.value ? parseInt(e.target.value, 10) : undefined;
+                                    handleUpdateSource(source.id, { gcoreOptimizeNum: val });
+                                  }}
+                                  placeholder="默认 3 (最大 20)"
+                                  className="w-48 bg-black/40 border border-technical-border rounded-sm px-2.5 py-1.5 font-mono text-xs text-gray-300 focus:outline-none focus:border-technical-cyan/50"
+                                />
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="animate-fadeIn">
+                              <label className="block text-[9px] font-display text-technical-muted uppercase tracking-widest mb-1">
+                                自定义优选域名/IP（以逗号/空格分隔，不填则默认直接使用域名连接）
+                              </label>
+                              <input
+                                type="text"
+                                value={source.gcoreOptimizeDomain ?? ''}
+                                onChange={(e) => {
+                                  setGlobalUrls(globalUrls.map(u => u.id === source.id ? { ...u, gcoreOptimizeDomain: e.target.value } : u));
+                                }}
+                                onBlur={(e) => {
+                                  handleUpdateSource(source.id, { gcoreOptimizeDomain: e.target.value.trim() || undefined });
+                                }}
+                                placeholder="输入域名或 IP 列表，如: Seoul-node.gcdn.co, 1.2.3.4"
+                                className="w-full bg-black/40 border border-technical-border rounded-sm px-2.5 py-1.5 font-mono text-xs text-gray-300 focus:outline-none focus:border-technical-cyan/50"
+                              />
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>
