@@ -997,7 +997,7 @@ async function handleUrlCacheSync(id: string, env: Env): Promise<Response> {
   
   try {
     // 强制拉取最新数据（节点和流量信息）并写入 KV
-    await updateSubscriptionCache(env, entry, 'clash.meta');
+    await updateSubscriptionCache(env, entry, 'Clash/1.8.0');
     
     // 更新此条目的最近一次自动/手动刷新时间
     const idx = globalUrls.findIndex(u => u.id === id);
