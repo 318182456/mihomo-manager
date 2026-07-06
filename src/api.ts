@@ -39,6 +39,7 @@ export interface UrlEntry {
   gcoreOptimizeType?: 'api' | 'custom';
   gcoreOptimizeIsp?: string;
   simplifyNames?: boolean;
+  namePrefix?: string;
   onlyCdnAtNight?: boolean;
   cfOptimizeIsp?: string;
 }

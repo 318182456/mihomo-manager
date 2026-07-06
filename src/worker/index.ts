@@ -201,6 +201,7 @@ export interface UrlEntry {
   gcoreOptimizeType?: 'api' | 'custom';
   gcoreOptimizeIsp?: string;
   simplifyNames?: boolean;
+  namePrefix?: string;
   onlyCdnAtNight?: boolean;
   cfOptimizeIsp?: string;
 }
@@ -1929,6 +1930,9 @@ async function fetchProxiesFromGroup(
       if (!p || !p.name) continue;
       if (entry.simplifyNames) {
         p.name = simplifyNodeName(p.name);
+      }
+      if (entry.namePrefix) {
+        p.name = entry.namePrefix + p.name;
       }
       if (filterRe && !filterRe.test(p.name)) continue;
       
