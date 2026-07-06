@@ -1357,16 +1357,25 @@ async function updateSubscriptionCache(
   entry: UrlEntry,
   userAgent: string = 'clash.meta'
 ): Promise<SubscriptionCache> {
+  if (!entry) {
+    throw new Error('订阅源条目 (entry) 为空');
+  }
+  if (!entry.url) {
+    throw new Error(`订阅源 (ID: ${entry.id || '未知'}, 名称: ${entry.name || '无'}) 的 url 属性为空或未定义`);
+  }
+
   const cacheKey = `sub_cache:${entry.id}`;
   
-  // 支持空格、逗号、分号或竖线分隔的多个 URL
+  // 支持空格、逗号、分号或竖线分隔 of 多个 URL
   const urls = entry.url.split(/[\s,;|]+/).map(u => u.trim()).filter(u => u.startsWith('http'));
+  console.log(`[Cache Sync] 开始同步订阅源 ${entry.name || entry.id}, 解析出的 URL 数量: ${urls.length}, URLs: ${JSON.stringify(urls)}`);
   if (urls.length === 0) {
-    throw new Error('订阅源 URL 为空');
+    throw new Error(`订阅源 URL 解析为空，原始 url 内容: "${entry.url}"`);
   }
 
   // 辅助函数：拉取单个 URL
   const fetchOne = async (url: string) => {
+    console.log(`[Cache Sync] 正在发起 fetch 请求: ${url}`);
     const controller = new AbortController();
     const id = setTimeout(() => controller.abort(), 6000); // 6秒超时保护
     try {
@@ -1378,14 +1387,16 @@ async function updateSubscriptionCache(
         }
       });
       clearTimeout(id);
+      console.log(`[Cache Sync] 上游 URL (${url}) 响应成功，状态码: ${response.status} (${response.statusText || '无原因短语'})`);
       if (!response.ok) {
-        throw new Error(`HTTP ${response.status} (${response.statusText || 'No status text'})`);
+        throw new Error(`请求上游失败: HTTP ${response.status} (${response.statusText || 'No status text'})`);
       }
       const text = await response.text();
       const info = response.headers.get('subscription-userinfo') || response.headers.get('Subscription-Userinfo') || '';
       return { text, info };
     } catch (err: any) {
       clearTimeout(id);
+      console.error(`[Cache Sync] 请求上游 URL (${url}) 异常:`, err);
       throw err;
     }
   };
