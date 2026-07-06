@@ -997,7 +997,7 @@ async function handleUrlCacheSync(id: string, env: Env): Promise<Response> {
   
   try {
     // 强制拉取最新数据（节点和流量信息）并写入 KV
-    await updateSubscriptionCache(env, entry, 'Clash/1.8.0');
+    await updateSubscriptionCache(env, entry, 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36 Edg/149.0.0.0');
     
     // 更新此条目的最近一次自动/手动刷新时间
     const idx = globalUrls.findIndex(u => u.id === id);
@@ -1972,97 +1972,25 @@ async function fetchProxiesFromGroup(
         const originalServer = p.server;
         const hostDomain = p.servername || p.sni || p['ws-opts']?.headers?.Host || p['ws-opts']?.headers?.host || originalServer;
 
-        const isBlocked = gfwStatusMap.get(originalServer) || false;
+        const cloned = JSON.parse(JSON.stringify(p));
+        cloned.server = hostDomain;
+        cloned.tls = true;
+        cloned.port = 443;
 
-        // 保留原节点
-        if (!entry.gcoreOptimizeHideOriginal && !isBlocked) {
-          proxies.push(p);
-        }
+        // 保持 SNI
+        if (!cloned.sni) cloned.sni = hostDomain;
+        if (!cloned.servername) cloned.servername = hostDomain;
 
-        // 获取优选列表
-        let targets: { ip: string; isp: string }[] = [];
-        const useCustom = entry.gcoreOptimizeType === 'custom' || (!entry.gcoreOptimizeType && entry.gcoreOptimizeDomain);
-        
-        if (useCustom && entry.gcoreOptimizeDomain) {
-          const customList = entry.gcoreOptimizeDomain.split(/[,，\s]+/).map(x => x.trim()).filter(Boolean);
-          targets = customList.map((val, idx) => ({
-            ip: val,
-            isp: customList.length === 1 ? 'Gcore优选' : `Gcore优选 ${idx + 1}`
-          }));
-        } else {
-          // 系统测速 IP 模式 (api)
-          const limit = entry.gcoreOptimizeNum || 3;
-          try {
-            const rawCached = await env.KV.get('gcore_optimized_ips');
-            if (rawCached) {
-              const cachedList = JSON.parse(rawCached) as GcoreTestResult[];
-              const okIps = cachedList.filter(x => x.loss < 100).slice(0, limit);
-              targets = okIps.map((x, idx) => ({
-                ip: x.ip,
-                isp: `Gcore优选 ${idx + 1} (${x.latency}ms)`
-              }));
-            }
-          } catch (e) {
-            console.error('[Gcore Optimize] 读取优选 IP 缓存失败:', e);
-          }
-
-          // 兜底：若缓存为空或无有效IP，使用一组高质量 Asian Gcore IP
-          if (targets.length === 0) {
-            const defaultList = ['92.223.63.11', '92.223.63.22', '92.223.63.29', '92.223.76.22', '92.223.78.26'];
-            const sel = defaultList.slice(0, limit);
-            targets = sel.map((ip, idx) => ({
-              ip,
-              isp: `Gcore默认 ${idx + 1}`
-            }));
+        // 对于 ws 传输，保持 Host
+        if (cloned.network === 'ws' || cloned.type === 'vmess') {
+          if (!cloned['ws-opts']) cloned['ws-opts'] = { path: '/' };
+          if (!cloned['ws-opts'].headers) cloned['ws-opts'].headers = {};
+          if (!cloned['ws-opts'].headers.Host && !cloned['ws-opts'].headers.host) {
+            cloned['ws-opts'].headers.Host = hostDomain;
           }
         }
 
-        if (targets.length > 0) {
-          targets.forEach((opt) => {
-            const cloned = JSON.parse(JSON.stringify(p));
-            cloned.name = `${p.name} - ${opt.isp}`;
-            cloned.server = opt.ip;
-            cloned.tls = true;
-            cloned.port = 443;
-
-            // 保持 SNI
-            if (!cloned.sni) cloned.sni = hostDomain;
-            if (!cloned.servername) cloned.servername = hostDomain;
-
-            // 对于 ws 传输，保持 Host
-            if (cloned.network === 'ws' || cloned.type === 'vmess') {
-              if (!cloned['ws-opts']) cloned['ws-opts'] = { path: '/' };
-              if (!cloned['ws-opts'].headers) cloned['ws-opts'].headers = {};
-              if (!cloned['ws-opts'].headers.Host && !cloned['ws-opts'].headers.host) {
-                cloned['ws-opts'].headers.Host = hostDomain;
-              }
-            }
-
-            proxies.push(cloned);
-          });
-        } else {
-          // 直接使用域名连接
-          const cloned = JSON.parse(JSON.stringify(p));
-          cloned.name = p.name;
-          cloned.server = hostDomain;
-          cloned.tls = true;
-          cloned.port = 443;
-
-          // 保持 SNI
-          if (!cloned.sni) cloned.sni = hostDomain;
-          if (!cloned.servername) cloned.servername = hostDomain;
-
-          // 对于 ws 传输，保持 Host
-          if (cloned.network === 'ws' || cloned.type === 'vmess') {
-            if (!cloned['ws-opts']) cloned['ws-opts'] = { path: '/' };
-            if (!cloned['ws-opts'].headers) cloned['ws-opts'].headers = {};
-            if (!cloned['ws-opts'].headers.Host && !cloned['ws-opts'].headers.host) {
-              cloned['ws-opts'].headers.Host = hostDomain;
-            }
-          }
-
-          proxies.push(cloned);
-        }
+        proxies.push(cloned);
         continue;
       }
 

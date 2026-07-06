@@ -853,21 +853,6 @@ function SubscriptionsView() {
           </button>
         ) : (
           <div className="flex gap-2">
-            <button 
-              className="technical-button-outline border-technical-cyan/30 text-technical-cyan hover:bg-technical-cyan/5 gap-1.5"
-              onClick={handleFetchGcoreIps}
-            >
-              <Activity size={14} />
-              <span>Gcore 优选 IP ({gcoreIps.length || 0})</span>
-            </button>
-            <button 
-              className="technical-button-outline border-technical-cyan/30 text-technical-cyan hover:bg-technical-cyan/5 gap-1.5"
-              onClick={handleGcoreSpeedtest}
-              disabled={gcoreSpeedtesting}
-            >
-              <RefreshCw size={14} className={gcoreSpeedtesting ? 'animate-spin' : ''} />
-              <span>{gcoreSpeedtesting ? '测速中...' : 'Gcore 测速'}</span>
-            </button>
             <button className="technical-button-outline border-technical-cyan/30 text-technical-cyan hover:bg-technical-cyan/5 gap-1.5" onClick={handleImportUrls}>
               <LogIn size={14} /><span>导入 URL</span>
             </button>
