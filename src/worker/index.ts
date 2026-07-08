@@ -204,6 +204,7 @@ export interface UrlEntry {
   namePrefix?: string;
   onlyCdnAtNight?: boolean;
   cfOptimizeIsp?: string;
+  relayRules?: string;
 }
 
 export interface SubscriptionGroup {
@@ -802,6 +803,9 @@ async function handleAPI(request: Request, env: Env, pathname: string, ctx: Exec
         if (method === 'POST' && id && action === 'sync_cache') {
           return handleUrlCacheSync(id, env);
         }
+        if (method === 'GET' && id && action === 'proxies') {
+          return handleUrlProxies(id, env.KV);
+        }
         return handleUrls(request, env.KV, method, id);
 
       case 'templates':     return handleTemplates(request, env.ATTACHMENTS, method, id);
@@ -1009,6 +1013,34 @@ async function handleUrlCacheSync(id: string, env: Env): Promise<Response> {
   } catch (e) {
     console.error(`[SyncCache] 同步上游订阅失败 (ID: ${id}):`, e);
     return err(`同步上游订阅失败: ${String(e)}`, 502);
+  }
+}
+
+async function handleUrlProxies(id: string, kv: KVNamespace): Promise<Response> {
+  const globalUrls = await getGlobalUrlsAndMigrate(kv);
+  const entry = globalUrls.find(u => u.id === id);
+  if (!entry) return err404();
+  
+  try {
+    const resText = await fetch(entry.url.trim(), { method: 'GET', headers: { 'User-Agent': 'clash.meta' } }).then(r => r.text());
+    let parsed: any[] = [];
+    if (isNodeList(resText)) {
+      parsed = parseNodeURIs(resText);
+    }
+    if (parsed.length === 0) {
+      try {
+        const yml = jsyaml.load(resText) as any;
+        if (yml && Array.isArray(yml.proxies)) parsed = yml.proxies;
+      } catch (e) {}
+    }
+    return ok(parsed.map(p => ({
+      name: p.name,
+      type: p.type || 'unknown',
+      server: p.server || '',
+      port: p.port || ''
+    })));
+  } catch (e) {
+    return err(`获取节点失败: ${String(e)}`, 500);
   }
 }
 
@@ -1586,6 +1618,59 @@ async function fetchSubscriptionUserInfo(entries: UrlEntry[], env: Env, ctx?: Ex
   return `upload=${upload}; download=${download}; total=${total}; expire=${expire}`;
 }
 
+interface RelayRule {
+  matchServer: string;
+  matchPort?: number;
+  relayServer: string;
+  relayPort: number;
+  newName?: string;
+}
+
+function parseRelayRules(rulesStr?: string): RelayRule[] {
+  if (!rulesStr) return [];
+  const rules: RelayRule[] = [];
+  const lines = rulesStr.split('\n');
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const parts = trimmed.split(/->|=>/);
+    if (parts.length !== 2) continue;
+    const matchPart = parts[0].trim();
+    const relayPartWithComment = parts[1].trim();
+
+    const nameParts = relayPartWithComment.split('|');
+    const relayPart = nameParts[0].trim();
+    const newName = nameParts[1] ? nameParts[1].trim() : undefined;
+
+    let matchServer = matchPart;
+    let matchPort: number | undefined;
+    if (matchPart.includes(':')) {
+      const lastColon = matchPart.lastIndexOf(':');
+      matchServer = matchPart.substring(0, lastColon);
+      matchPort = parseInt(matchPart.substring(lastColon + 1), 10);
+    }
+
+    let relayServer = relayPart;
+    let relayPort = 0;
+    if (relayPart.includes(':')) {
+      const lastColon = relayPart.lastIndexOf(':');
+      relayServer = relayPart.substring(0, lastColon);
+      relayPort = parseInt(relayPart.substring(lastColon + 1), 10);
+    }
+
+    if (relayServer && relayPort) {
+      rules.push({
+        matchServer,
+        matchPort: isNaN(matchPort as any) ? undefined : matchPort,
+        relayServer,
+        relayPort,
+        newName
+      });
+    }
+  }
+  return rules;
+}
+
 /**
  * JS 引擎版（带 lookahead）——用于前端预览和 worker 内部 JS 过滤。
  * 普通正则：直接返回；高级 JSON：编译为含 lookahead 的正则。
@@ -1860,6 +1945,24 @@ async function fetchProxiesFromGroup(
     parsedProxiesList.push(parsed);
   }
 
+  // 解析并提前异步解析所有中转规则的目标匹配域名为 IP 缓存，支持 IP 匹配
+  const ruleIpCache = new Map<string, string>();
+  const allMatchServers = new Set<string>();
+  for (const entry of group.urls) {
+    if (entry && entry.relayRules) {
+      const rules = parseRelayRules(entry.relayRules);
+      for (const r of rules) {
+        if (r.matchServer) {
+          allMatchServers.add(r.matchServer.trim().toLowerCase());
+        }
+      }
+    }
+  }
+  await Promise.all(Array.from(allMatchServers).map(async host => {
+    const ip = await resolveDomainToIp(host);
+    ruleIpCache.set(host, ip);
+  }));
+
   // 针对启用了 cfOptimize 的订阅，收集其唯一 server 并批量查/触发 GFW 检测
   const uniqueServers = new Set<string>();
   for (let i = 0; i < parsedProxiesList.length; i++) {
@@ -1928,6 +2031,38 @@ async function fetchProxiesFromGroup(
 
     for (const p of parsed) {
       if (!p || !p.name) continue;
+
+      // Apply Relay/Transit rules
+      if (entry.relayRules) {
+        const rules = parseRelayRules(entry.relayRules);
+        const matchedRule = rules.find(r => {
+          const resolvedMatchIp = ruleIpCache.get(r.matchServer.trim().toLowerCase()) || r.matchServer;
+          const hostMatch =
+            p.server?.trim().toLowerCase() === r.matchServer.trim().toLowerCase() ||
+            p.server?.trim() === resolvedMatchIp;
+          const portMatch = r.matchPort === undefined || Number(p.port) === r.matchPort;
+          return hostMatch && portMatch;
+        });
+        if (matchedRule) {
+          const hostDomain = p.servername || p.sni || p.server;
+          if (p.tls || p.type === 'trojan' || p.type === 'vless' || p.type === 'vmess' || p.type === 'hysteria2') {
+            if (!p.sni) p.sni = hostDomain;
+            if (!p.servername) p.servername = hostDomain;
+          }
+          p.server = matchedRule.relayServer;
+          p.port = matchedRule.relayPort;
+          if (matchedRule.newName) {
+            if (matchedRule.newName.includes('{name}')) {
+              p.name = matchedRule.newName.replace('{name}', p.name);
+            } else if (matchedRule.newName.startsWith('+')) {
+              p.name = matchedRule.newName.substring(1) + p.name;
+            } else {
+              p.name = matchedRule.newName;
+            }
+          }
+        }
+      }
+
       if (entry.simplifyNames) {
         p.name = simplifyNodeName(p.name);
       }

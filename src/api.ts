@@ -42,6 +42,7 @@ export interface UrlEntry {
   namePrefix?: string;
   onlyCdnAtNight?: boolean;
   cfOptimizeIsp?: string;
+  relayRules?: string;
 }
 
 export interface SubscriptionGroup {
@@ -186,6 +187,8 @@ export const refreshUrl = (id: string) =>
   apiFetch<{ ok: boolean; url: string }>(`/api/urls/${id}/refresh`, { method:'POST' });
 export const syncUrlCache = (id: string) =>
   apiFetch<{ ok: boolean; msg: string }>(`/api/urls/${id}/sync_cache`, { method:'POST' });
+export const getUrlProxies = (id: string) =>
+  apiFetch<{ name: string; type: string; server: string; port: number }[]>(`/api/urls/${id}/proxies`);
 
 // ---------- Templates ----------
 

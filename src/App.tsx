@@ -623,6 +623,20 @@ function SubscriptionsView() {
 
   const [proxyCache, setProxyCache] = useState<Record<string, { name: string; server: string }[]>>({});
   const [loadingProxies, setLoadingProxies] = useState<Record<string, boolean>>({});
+  const [sourceProxies, setSourceProxies] = useState<Record<string, any[]>>({});
+  const [loadingSourceProxies, setLoadingSourceProxies] = useState<Record<string, boolean>>({});
+
+  const handleFetchSourceProxies = async (sourceId: string) => {
+    setLoadingSourceProxies(prev => ({ ...prev, [sourceId]: true }));
+    try {
+      const proxies = await api.getUrlProxies(sourceId);
+      setSourceProxies(prev => ({ ...prev, [sourceId]: proxies }));
+    } catch (e: any) {
+      alert(e.message || '获取节点失败');
+    } finally {
+      setLoadingSourceProxies(prev => ({ ...prev, [sourceId]: false }));
+    }
+  };
 
   const [dragInfo, setDragInfo] = useState<{ groupId: string; index: number } | null>(null);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
@@ -1914,6 +1928,30 @@ function SubscriptionsView() {
                       )}
                     </div>
 
+                    {/* 中转与端口转发配置 */}
+                    <div className="pt-2 border-t border-technical-border/20 space-y-3">
+                      <label className="block text-[10px] font-display font-bold text-technical-cyan uppercase tracking-widest">
+                        中转与端口转发配置
+                      </label>
+                      <div className="space-y-2">
+                        <label className="block text-[9px] font-display text-technical-muted uppercase tracking-widest mb-1">
+                          中转映射规则 (格式: 原服务器:原端口 {"->"} 中转服务器:中转端口 | 新名称修饰)
+                        </label>
+                        <textarea
+                          rows={3}
+                          value={source.relayRules ?? ''}
+                          onChange={(e) => {
+                            setGlobalUrls(globalUrls.map(u => u.id === source.id ? { ...u, relayRules: e.target.value } : u));
+                          }}
+                          onBlur={(e) => {
+                            handleUpdateSource(source.id, { relayRules: e.target.value.trim() || undefined });
+                          }}
+                          placeholder={"# 每行一条规则\n# 示例 1 (前缀): proxy.host:21872 -> 103.181.164.41:25142 | +香港中转\n# 示例 2 (改名): proxy.host:21872 -> 103.181.164.41:25142 | 香港 IEPL x5\n# 示例 3 (保留): proxy.host:21872 -> 103.181.164.41:25142 | IEPL -> {name}"}
+                          className="w-full bg-black/40 border border-technical-border rounded-sm px-2.5 py-1.5 font-mono text-xs text-gray-300 focus:outline-none focus:border-technical-cyan/50"
+                        />
+                      </div>
+                    </div>
+
                     {(() => {
                       let domain = '';
                       try {
@@ -1941,6 +1979,15 @@ function SubscriptionsView() {
                         <RefreshCw size={12} className={refreshingKey === `${refKey}-sync` ? 'animate-spin' : ''} />
                         <span>{refreshingKey === `${refKey}-sync` ? '同步中...' : '手动拉取上游'}</span>
                       </button>
+                      <button
+                        onClick={() => handleFetchSourceProxies(source.id)}
+                        disabled={loadingSourceProxies[source.id]}
+                        className="technical-button-outline py-1 px-3 text-xs gap-1.5 disabled:opacity-40 border-technical-cyan/30 text-technical-cyan hover:bg-technical-cyan/5"
+                        title="获取订阅源中的所有代理节点，可在此直接配置中转"
+                      >
+                        {loadingSourceProxies[source.id] ? <Activity size={12} className="animate-spin" /> : <Settings2 size={12} />}
+                        <span>{loadingSourceProxies[source.id] ? '获取中...' : '获取节点列表'}</span>
+                      </button>
                       {urlMsg?.key === refKey && (
                         <span className={`text-xs font-mono flex items-center gap-1 ${urlMsg.ok ? 'text-green-400' : 'text-red-400'}`}>
                           {urlMsg.ok ? <CheckCircle2 size={12} /> : <AlertTriangle size={12} />}
@@ -1953,6 +2000,74 @@ function SubscriptionsView() {
                         </span>
                       )}
                     </div>
+
+                    {/* 节点预览与中转配置列表 */}
+                    {sourceProxies[source.id] && (
+                      <div className="bg-black/60 border border-technical-border/50 rounded p-3 text-xs font-mono max-h-60 overflow-y-auto space-y-2 mt-3 w-full animate-fadeIn">
+                        <div className="text-[10px] text-technical-muted mb-2 border-b border-technical-border/30 pb-1 flex justify-between">
+                          <span>订阅节点列表 (总计 {sourceProxies[source.id].length} 个节点)</span>
+                          <button
+                            onClick={() => {
+                              setSourceProxies(prev => {
+                                const next = { ...prev };
+                                delete next[source.id];
+                                return next;
+                              });
+                            }}
+                            className="text-technical-muted hover:text-white"
+                          >
+                            关闭预览
+                          </button>
+                        </div>
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-[11px] text-left text-zinc-300">
+                            <thead>
+                              <tr className="border-b border-technical-border/20 text-zinc-500 text-[10px] uppercase">
+                                <th className="py-1 pr-2">节点名称</th>
+                                <th className="py-1 px-2">类型</th>
+                                <th className="py-1 px-2">原服务器:端口</th>
+                                <th className="py-1 pl-2 text-right">操作</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {sourceProxies[source.id].map((node: any, idx: number) => (
+                                <tr key={idx} className="border-b border-technical-border/10 hover:bg-white/2">
+                                  <td className="py-1.5 pr-2 font-bold max-w-[150px] truncate" title={node.name}>{node.name}</td>
+                                  <td className="py-1.5 px-2 text-technical-cyan uppercase">{node.type}</td>
+                                  <td className="py-1.5 px-2 font-mono text-[10px]">{node.server}:{node.port}</td>
+                                  <td className="py-1.5 pl-2 text-right">
+                                    <button
+                                      onClick={() => {
+                                        const relayServer = window.prompt(`正在为节点【${node.name}】添加中转规则。\n请输入中转 IP / 域名和端口 (格式为 host:port，如 103.181.164.41:25142):`);
+                                        if (!relayServer || !relayServer.includes(':')) {
+                                          if (relayServer) alert('输入格式不正确！必须包含冒号分割的端口。');
+                                          return;
+                                        }
+                                        const nameMod = window.prompt(`（可选）中转后名称修饰：\n- 输入 '+前缀' 为节点添加前缀（如: +[香港中转]）\n- 输入包含 '{name}' 可以保留原名称（如: 香港中转 - {name}）\n- 输入新名字直接替换\n- 直接留空不修改名称`);
+                                        
+                                        let ruleLine = `${node.server}:${node.port} -> ${relayServer.trim()}`;
+                                        if (nameMod) {
+                                          ruleLine += ` | ${nameMod.trim()}`;
+                                        }
+                                        
+                                        const currentRules = source.relayRules ? source.relayRules.trim() : '';
+                                        const newRules = currentRules ? `${currentRules}\n${ruleLine}` : ruleLine;
+                                        
+                                        setGlobalUrls(globalUrls.map(u => u.id === source.id ? { ...u, relayRules: newRules } : u));
+                                        handleUpdateSource(source.id, { relayRules: newRules });
+                                      }}
+                                      className="text-technical-cyan hover:text-white bg-technical-cyan/10 px-2 py-0.5 rounded border border-technical-cyan/20"
+                                    >
+                                      配置中转
+                                    </button>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
