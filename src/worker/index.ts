@@ -2135,7 +2135,7 @@ async function fetchProxiesFromGroup(
 
       if (entry.cfOptimize && isCdn && (entryCfIps.length > 0 || entry.cfOptimizeDomain)) {
         const originalServer = p.server;
-        const hostDomain = p.servername || p.sni || originalServer;
+        const hostDomain = p['ws-opts']?.headers?.Host || p['ws-opts']?.headers?.host || p.servername || p.sni || originalServer;
 
         const isBlocked = gfwStatusMap.get(originalServer) || false;
 
