@@ -2146,7 +2146,7 @@ async function fetchProxiesFromGroup(
         continue;
       }
 
-      if (entry.cfOptimize && isCdn && (entryCfIps.length > 0 || entry.cfOptimizeDomain)) {
+      if (entry.cfOptimize && isCdn && (entryCfIps.length > 0 || entry.cfOptimizeDomain || entry.cfOptimizeDomainCt || entry.cfOptimizeDomainCu || entry.cfOptimizeDomainCmcc)) {
         const originalServer = p.server;
         const hostDomain = p['ws-opts']?.headers?.Host || p['ws-opts']?.headers?.host || p.servername || p.sni || originalServer;
 
@@ -2168,9 +2168,12 @@ async function fetchProxiesFromGroup(
             return domainStr.split(/[,，\s]+/).map(x => x.trim()).filter(Boolean);
           };
 
-          const ctList = parseCustomList(entry.cfOptimizeDomainCt);
-          const cuList = parseCustomList(entry.cfOptimizeDomainCu);
-          const cmccList = parseCustomList(entry.cfOptimizeDomainCmcc);
+          const currentIsp = ispParam || entry.cfOptimizeIsp || 'ct,cu,cmcc';
+          const allowedIsps = currentIsp.split(',').map(x => x.trim().toLowerCase());
+
+          const ctList = allowedIsps.includes('ct') ? parseCustomList(entry.cfOptimizeDomainCt) : [];
+          const cuList = allowedIsps.includes('cu') ? parseCustomList(entry.cfOptimizeDomainCu) : [];
+          const cmccList = allowedIsps.includes('cmcc') ? parseCustomList(entry.cfOptimizeDomainCmcc) : [];
           const legacyList = parseCustomList(entry.cfOptimizeDomain);
 
           if (ctList.length > 0) {
