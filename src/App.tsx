@@ -1788,22 +1788,77 @@ function SubscriptionsView() {
                               </div>
                             </div>
                           ) : (
-                            <div className="animate-fadeIn">
-                              <label className="block text-[9px] font-display text-technical-muted uppercase tracking-widest mb-1">
-                                自定义优选域名/IP（以逗号/空格分隔，支持填写如 318182456.cf.090227.xyz 或 www.visa.com）
-                              </label>
-                              <input
-                                type="text"
-                                value={source.cfOptimizeDomain ?? ''}
-                                onChange={(e) => {
-                                  setGlobalUrls(globalUrls.map(u => u.id === source.id ? { ...u, cfOptimizeDomain: e.target.value } : u));
-                                }}
-                                onBlur={(e) => {
-                                  handleUpdateSource(source.id, { cfOptimizeDomain: e.target.value.trim() || undefined });
-                                }}
-                                placeholder="输入域名或 IP 列表，如: 318182456.cf.090227.xyz"
-                                className="w-full bg-black/40 border border-technical-border rounded-sm px-2.5 py-1.5 font-mono text-xs text-gray-300 focus:outline-none focus:border-technical-cyan/50"
-                              />
+                            <div className="animate-fadeIn space-y-3">
+                              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                                <div>
+                                  <label className="block text-[9px] font-display text-technical-muted uppercase tracking-widest mb-1">
+                                    电信 自定义域名/IP
+                                  </label>
+                                  <input
+                                    type="text"
+                                    value={source.cfOptimizeDomainCt ?? ''}
+                                    onChange={(e) => {
+                                      setGlobalUrls(globalUrls.map(u => u.id === source.id ? { ...u, cfOptimizeDomainCt: e.target.value } : u));
+                                    }}
+                                    onBlur={(e) => {
+                                      handleUpdateSource(source.id, { cfOptimizeDomainCt: e.target.value.trim() || undefined });
+                                    }}
+                                    placeholder="例如: telecom.wangxy.host"
+                                    className="w-full bg-black/40 border border-technical-border rounded-sm px-2.5 py-1.5 font-mono text-xs text-gray-300 focus:outline-none focus:border-technical-cyan/50"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block text-[9px] font-display text-technical-muted uppercase tracking-widest mb-1">
+                                    联通 自定义域名/IP
+                                  </label>
+                                  <input
+                                    type="text"
+                                    value={source.cfOptimizeDomainCu ?? ''}
+                                    onChange={(e) => {
+                                      setGlobalUrls(globalUrls.map(u => u.id === source.id ? { ...u, cfOptimizeDomainCu: e.target.value } : u));
+                                    }}
+                                    onBlur={(e) => {
+                                      handleUpdateSource(source.id, { cfOptimizeDomainCu: e.target.value.trim() || undefined });
+                                    }}
+                                    placeholder="例如: unicom.wangxy.host"
+                                    className="w-full bg-black/40 border border-technical-border rounded-sm px-2.5 py-1.5 font-mono text-xs text-gray-300 focus:outline-none focus:border-technical-cyan/50"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block text-[9px] font-display text-technical-muted uppercase tracking-widest mb-1">
+                                    移动 自定义域名/IP
+                                  </label>
+                                  <input
+                                    type="text"
+                                    value={source.cfOptimizeDomainCmcc ?? ''}
+                                    onChange={(e) => {
+                                      setGlobalUrls(globalUrls.map(u => u.id === source.id ? { ...u, cfOptimizeDomainCmcc: e.target.value } : u));
+                                    }}
+                                    onBlur={(e) => {
+                                      handleUpdateSource(source.id, { cfOptimizeDomainCmcc: e.target.value.trim() || undefined });
+                                    }}
+                                    placeholder="例如: mobile.wangxy.host"
+                                    className="w-full bg-black/40 border border-technical-border rounded-sm px-2.5 py-1.5 font-mono text-xs text-gray-300 focus:outline-none focus:border-technical-cyan/50"
+                                  />
+                                </div>
+                              </div>
+                              <div>
+                                <label className="block text-[9px] font-display text-technical-muted uppercase tracking-widest mb-1">
+                                  通用 自定义优选域名/IP (当上述未填时生效)
+                                </label>
+                                <input
+                                  type="text"
+                                  value={source.cfOptimizeDomain ?? ''}
+                                  onChange={(e) => {
+                                    setGlobalUrls(globalUrls.map(u => u.id === source.id ? { ...u, cfOptimizeDomain: e.target.value } : u));
+                                  }}
+                                  onBlur={(e) => {
+                                    handleUpdateSource(source.id, { cfOptimizeDomain: e.target.value.trim() || undefined });
+                                  }}
+                                  placeholder="输入域名或 IP 列表，以逗号/空格分隔"
+                                  className="w-full bg-black/40 border border-technical-border rounded-sm px-2.5 py-1.5 font-mono text-xs text-gray-300 focus:outline-none focus:border-technical-cyan/50"
+                                />
+                              </div>
                             </div>
                           )}
                         </div>
@@ -1949,6 +2004,22 @@ function SubscriptionsView() {
                           placeholder={"# 每行一条规则\n# 示例 1 (前缀): proxy.host:21872 -> 103.181.164.41:25142 | +香港中转\n# 示例 2 (改名): proxy.host:21872 -> 103.181.164.41:25142 | 香港 IEPL x5\n# 示例 3 (保留): proxy.host:21872 -> 103.181.164.41:25142 | IEPL -> {name}"}
                           className="w-full bg-black/40 border border-technical-border rounded-sm px-2.5 py-1.5 font-mono text-xs text-gray-300 focus:outline-none focus:border-technical-cyan/50"
                         />
+                        <div className="flex items-center gap-2 mt-1">
+                          <label className="flex items-center gap-1.5 text-[11px] text-technical-muted cursor-pointer select-none">
+                            <input
+                              type="checkbox"
+                              checked={source.excludeRelayed ?? false}
+                              onChange={(e) => {
+                                setGlobalUrls(globalUrls.map(u => u.id === source.id ? { ...u, excludeRelayed: e.target.checked } : u));
+                                handleUpdateSource(source.id, { excludeRelayed: e.target.checked });
+                              }}
+                              className="bg-black/40 border border-technical-border rounded-sm text-technical-cyan focus:ring-0 outline-none w-3.5 h-3.5"
+                            />
+                            <span className={source.excludeRelayed ? 'text-technical-cyan font-bold' : ''}>
+                              屏蔽匹配了中转规则的节点
+                            </span>
+                          </label>
+                        </div>
                       </div>
                     </div>
 

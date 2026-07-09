@@ -30,6 +30,9 @@ export interface UrlEntry {
   cfOptimizeOnlyCdn?: boolean;
   cfOptimizeHideOriginal?: boolean;
   cfOptimizeDomain?: string;
+  cfOptimizeDomainCt?: string;
+  cfOptimizeDomainCu?: string;
+  cfOptimizeDomainCmcc?: string;
   cfOptimizeType?: 'api' | 'custom';
   gcoreOptimize?: boolean;
   gcoreOptimizeNum?: number;
@@ -43,6 +46,7 @@ export interface UrlEntry {
   onlyCdnAtNight?: boolean;
   cfOptimizeIsp?: string;
   relayRules?: string;
+  excludeRelayed?: boolean;
 }
 
 export interface SubscriptionGroup {

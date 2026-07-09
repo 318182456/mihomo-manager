@@ -192,6 +192,9 @@ export interface UrlEntry {
   cfOptimizeOnlyCdn?: boolean;
   cfOptimizeHideOriginal?: boolean;
   cfOptimizeDomain?: string;
+  cfOptimizeDomainCt?: string;
+  cfOptimizeDomainCu?: string;
+  cfOptimizeDomainCmcc?: string;
   cfOptimizeType?: 'api' | 'custom';
   gcoreOptimize?: boolean;
   gcoreOptimizeNum?: number;
@@ -205,6 +208,7 @@ export interface UrlEntry {
   onlyCdnAtNight?: boolean;
   cfOptimizeIsp?: string;
   relayRules?: string;
+  excludeRelayed?: boolean;
 }
 
 export interface SubscriptionGroup {
@@ -1906,7 +1910,8 @@ async function fetchProxiesFromGroup(
   env: Env,
   ctx?: ExecutionContext,
   ispParam?: string | null,
-  ipsParam?: string | null
+  ipsParam?: string | null,
+  excludeRelayedParam?: string | null
 ): Promise<{ proxies: any[]; rawYamls: string[] }> {
   const filter = compileGroupFilter(group.filter);
   const filterRe = filter ? new RegExp(filter) : null;
@@ -2029,6 +2034,11 @@ async function fetchProxiesFromGroup(
       }
     }
 
+    let isExcludeRelayed = entry.excludeRelayed ?? false;
+    if (excludeRelayedParam !== null) {
+      isExcludeRelayed = excludeRelayedParam === 'true' || excludeRelayedParam === '1';
+    }
+
     for (const p of parsed) {
       if (!p || !p.name) continue;
 
@@ -2044,6 +2054,9 @@ async function fetchProxiesFromGroup(
           return hostMatch && portMatch;
         });
         if (matchedRule) {
+          if (isExcludeRelayed) {
+            continue;
+          }
           const hostDomain = p.servername || p.sni || p.server;
           if (p.tls || p.type === 'trojan' || p.type === 'vless' || p.type === 'vmess' || p.type === 'hysteria2') {
             if (!p.sni) p.sni = hostDomain;
@@ -2146,13 +2159,52 @@ async function fetchProxiesFromGroup(
 
         // 获取优选列表 (根据优化模式判断)
         let targets: { ip: string; isp: string }[] = [];
-        const useCustom = entry.cfOptimizeType === 'custom' || (!entry.cfOptimizeType && entry.cfOptimizeDomain);
-        if (useCustom && entry.cfOptimizeDomain) {
-          const customList = entry.cfOptimizeDomain.split(/[,，\s]+/).map(x => x.trim()).filter(Boolean);
-          targets = customList.map((val, idx) => ({
-            ip: val,
-            isp: customList.length === 1 ? '优选' : `优选 ${idx + 1}`
-          }));
+        const useCustom = entry.cfOptimizeType === 'custom' || 
+          (!entry.cfOptimizeType && (entry.cfOptimizeDomain || entry.cfOptimizeDomainCt || entry.cfOptimizeDomainCu || entry.cfOptimizeDomainCmcc));
+        
+        if (useCustom) {
+          const parseCustomList = (domainStr?: string) => {
+            if (!domainStr) return [];
+            return domainStr.split(/[,，\s]+/).map(x => x.trim()).filter(Boolean);
+          };
+
+          const ctList = parseCustomList(entry.cfOptimizeDomainCt);
+          const cuList = parseCustomList(entry.cfOptimizeDomainCu);
+          const cmccList = parseCustomList(entry.cfOptimizeDomainCmcc);
+          const legacyList = parseCustomList(entry.cfOptimizeDomain);
+
+          if (ctList.length > 0) {
+            ctList.forEach((val, idx) => {
+              targets.push({
+                ip: val,
+                isp: ctList.length === 1 ? '电信' : `电信 ${idx + 1}`
+              });
+            });
+          }
+          if (cuList.length > 0) {
+            cuList.forEach((val, idx) => {
+              targets.push({
+                ip: val,
+                isp: cuList.length === 1 ? '联通' : `联通 ${idx + 1}`
+              });
+            });
+          }
+          if (cmccList.length > 0) {
+            cmccList.forEach((val, idx) => {
+              targets.push({
+                ip: val,
+                isp: cmccList.length === 1 ? '移动' : `移动 ${idx + 1}`
+              });
+            });
+          }
+          if (legacyList.length > 0 && ctList.length === 0 && cuList.length === 0 && cmccList.length === 0) {
+            legacyList.forEach((val, idx) => {
+              targets.push({
+                ip: val,
+                isp: legacyList.length === 1 ? '优选' : `优选 ${idx + 1}`
+              });
+            });
+          }
         } else {
           const limit = entry.cfOptimizeNum || 5;
           const optimizedIps = entryCfIps.slice(0, limit);
@@ -2245,6 +2297,7 @@ async function handleSubFetch(pathname: string, env: Env, request: Request, ctx:
   const urlIndexParam = urlParams.get('url_index');
   const ispParam = urlParams.get('isp');
   const ipsParam = urlParams.get('ips');
+  const excludeRelayedParam = urlParams.get('exclude_relayed');
 
   // 若请求指定了特定的上级订阅源，则作为 proxy-provider 接口直接返回节点列表
   if (providerParam || urlIdParam || urlIndexParam !== null) {
@@ -2261,7 +2314,7 @@ async function handleSubFetch(pathname: string, env: Env, request: Request, ctx:
     }
 
     const resolvedGroup = { ...group, urls: targetUrls };
-    const { proxies } = await fetchProxiesFromGroup(resolvedGroup, env, ctx, ispParam, ipsParam);
+    const { proxies } = await fetchProxiesFromGroup(resolvedGroup, env, ctx, ispParam, ipsParam, excludeRelayedParam);
     const userInfo = await fetchSubscriptionUserInfo(targetUrls, env, ctx);
 
     if (wantNodes) {
@@ -2279,7 +2332,13 @@ async function handleSubFetch(pathname: string, env: Env, request: Request, ctx:
   const userInfo = await fetchSubscriptionUserInfo(group.urls, env, ctx);
 
   // 拉取并过滤代理节点
-  const { proxies, rawYamls } = await fetchProxiesFromGroup(group, env, ctx, ispParam, ipsParam);
+  const { proxies, rawYamls } = await fetchProxiesFromGroup(group, env, ctx, ispParam, ipsParam, excludeRelayedParam);
+
+  // 如果客户端需要纯节点（如 v2rayn, nekobox, shadowrocket）
+  if (wantNodes) {
+    const nodeText = proxies.map(p => proxyToURI(p)).filter(Boolean).join('\n');
+    return subResponse(safeBtoa(nodeText), link.name, userInfo, true, proxyUpdateInterval);
+  }
 
   if (!tpl) {
     if (proxies.length > 0) {
