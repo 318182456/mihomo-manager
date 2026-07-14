@@ -618,7 +618,15 @@ function SubscriptionsView() {
 
   // Expanded configurations
   const [expandedKey, setExpandedKey] = useState<string | null>(null); // 'source-{id}' or 'group-{id}'
+  const [expandedGroupIds, setExpandedGroupIds] = useState<Record<string, boolean>>({});
   const [refreshingKey, setRefreshingKey] = useState<string | null>(null);
+
+  const toggleGroupExpand = (groupId: string) => {
+    setExpandedGroupIds(prev => ({
+      ...prev,
+      [groupId]: !prev[groupId]
+    }));
+  };
   const [urlMsg, setUrlMsg] = useState<{ key: string; ok: boolean; text: string } | null>(null);
 
   const [proxyCache, setProxyCache] = useState<Record<string, { name: string; server: string }[]>>({});
@@ -902,8 +910,23 @@ function SubscriptionsView() {
           {groups.map((group) => (
             <section key={group.id} className={`technical-card flex flex-col ${!group.enabled ? 'opacity-60 grayscale' : ''}`}>
               {/* 组头 */}
-              <div className="bg-zinc-900 px-4 py-3 flex justify-between items-center border-b border-technical-border">
+              <div
+                onClick={(e) => {
+                  if (
+                    e.target instanceof HTMLInputElement || 
+                    e.target instanceof HTMLButtonElement ||
+                    (e.target as HTMLElement).closest('button') ||
+                    (e.target as HTMLElement).closest('input') ||
+                    (e.target as HTMLElement).closest('label')
+                  ) {
+                    return;
+                  }
+                  toggleGroupExpand(group.id);
+                }}
+                className={`bg-zinc-900 px-4 py-3 flex justify-between items-center cursor-pointer select-none ${expandedGroupIds[group.id] ? 'border-b border-technical-border' : ''}`}
+              >
                 <div className="flex items-center gap-3 flex-1 min-w-0">
+                  <ChevronDown size={14} className={`text-technical-muted transition-transform shrink-0 ${expandedGroupIds[group.id] ? 'rotate-180' : ''}`} />
                   <Folder size={18} className="text-technical-muted shrink-0" />
                   <input
                     className="bg-transparent border-none text-gray-200 font-display font-bold p-0 focus:ring-0 outline-none w-full max-w-xs"
@@ -923,277 +946,281 @@ function SubscriptionsView() {
                 </div>
               </div>
 
-              {/* 筛选正则 */}
-              <div className="px-4 py-3 border-b border-technical-border/50 flex flex-col gap-3">
-                <div className="flex items-start sm:items-center gap-3">
-                  <div className="flex items-center gap-2 text-technical-muted font-display text-[10px] uppercase tracking-widest whitespace-nowrap shrink-0 mt-2 sm:mt-0">
-                    <Filter size={13} /><span>筛选:</span>
-                    <button 
-                      onClick={() => {
-                        const isAdv = group.filter?.startsWith('{"advanced":true');
-                        if (isAdv) {
-                          handleUpdateGroup(group.id, { filter: '' });
-                        } else {
-                          handleUpdateGroup(group.id, { filter: JSON.stringify({ advanced: true, rules: [] }) });
-                        }
-                      }}
-                      className={`ml-1 hover:text-technical-cyan transition-colors ${group.filter?.startsWith('{"advanced":true') ? 'text-technical-cyan' : ''}`}
-                      title="切换高级模式 (AND/OR/NOT)"
-                    >
-                      <Settings2 size={13} />
-                    </button>
-                  </div>
-                  {group.filter?.startsWith('{"advanced":true') ? (
-                    <div className="flex-1 min-w-0">
-                      {(() => {
-                        let rules: any[] = [];
-                        try { rules = JSON.parse(group.filter).rules || []; } catch {}
-                        
-                        const updateRules = (newRules: any[]) => {
-                          const newFilter = JSON.stringify({ advanced: true, rules: newRules });
-                          setGroups(groups.map(g => g.id === group.id ? { ...g, filter: newFilter } : g));
-                          handleUpdateGroup(group.id, { filter: newFilter });
-                        };
+              {expandedGroupIds[group.id] && (
+                <>
+                  {/* 筛选正则 */}
+                  <div className="px-4 py-3 border-b border-technical-border/50 flex flex-col gap-3">
+                    <div className="flex items-start sm:items-center gap-3">
+                      <div className="flex items-center gap-2 text-technical-muted font-display text-[10px] uppercase tracking-widest whitespace-nowrap shrink-0 mt-2 sm:mt-0">
+                        <Filter size={13} /><span>筛选:</span>
+                        <button 
+                          onClick={() => {
+                            const isAdv = group.filter?.startsWith('{"advanced":true');
+                            if (isAdv) {
+                              handleUpdateGroup(group.id, { filter: '' });
+                            } else {
+                              handleUpdateGroup(group.id, { filter: JSON.stringify({ advanced: true, rules: [] }) });
+                            }
+                          }}
+                          className={`ml-1 hover:text-technical-cyan transition-colors ${group.filter?.startsWith('{"advanced":true') ? 'text-technical-cyan' : ''}`}
+                          title="切换高级模式 (AND/OR/NOT)"
+                        >
+                          <Settings2 size={13} />
+                        </button>
+                      </div>
+                      {group.filter?.startsWith('{"advanced":true') ? (
+                        <div className="flex-1 min-w-0">
+                          {(() => {
+                            let rules: any[] = [];
+                            try { rules = JSON.parse(group.filter).rules || []; } catch {}
+                            
+                            const updateRules = (newRules: any[]) => {
+                              const newFilter = JSON.stringify({ advanced: true, rules: newRules });
+                              setGroups(groups.map(g => g.id === group.id ? { ...g, filter: newFilter } : g));
+                              handleUpdateGroup(group.id, { filter: newFilter });
+                            };
 
-                        return (
-                          <div className="flex flex-col gap-2 bg-black/40 border border-technical-border rounded-sm p-2 w-full overflow-hidden">
-                            {rules.map((rule, rIdx) => (
-                              <div key={rIdx} className="flex flex-col sm:flex-row sm:items-center gap-2 group/rule">
-                                <select 
-                                  value={rule.logic}
-                                  onChange={(e) => {
-                                    const n = [...rules];
-                                    n[rIdx].logic = e.target.value;
-                                    updateRules(n);
-                                  }}
-                                  className="bg-zinc-900 border border-technical-border text-[11px] text-technical-muted px-1.5 py-1 outline-none rounded-sm shrink-0"
+                            return (
+                              <div className="flex flex-col gap-2 bg-black/40 border border-technical-border rounded-sm p-2 w-full overflow-hidden">
+                                {rules.map((rule, rIdx) => (
+                                  <div key={rIdx} className="flex flex-col sm:flex-row sm:items-center gap-2 group/rule">
+                                    <select 
+                                      value={rule.logic}
+                                      onChange={(e) => {
+                                        const n = [...rules];
+                                        n[rIdx].logic = e.target.value;
+                                        updateRules(n);
+                                      }}
+                                      className="bg-zinc-900 border border-technical-border text-[11px] text-technical-muted px-1.5 py-1 outline-none rounded-sm shrink-0"
+                                    >
+                                      <option value="or">包含 (OR)</option>
+                                      <option value="and">必含 (AND)</option>
+                                      <option value="not">排除 (NOT)</option>
+                                    </select>
+                                    <input 
+                                      type="text"
+                                      value={rule.value}
+                                      onChange={(e) => {
+                                        const n = [...rules];
+                                        n[rIdx].value = e.target.value;
+                                        setGroups(groups.map(g => g.id === group.id ? { ...g, filter: JSON.stringify({ advanced: true, rules: n }) } : g));
+                                      }}
+                                      onBlur={() => {
+                                        const n = [...rules];
+                                        updateRules(n);
+                                      }}
+                                      placeholder="正则关键词..."
+                                      className="flex-1 min-w-0 bg-zinc-900 border border-technical-border/50 text-xs font-mono text-technical-cyan px-2 py-1 outline-none focus:border-technical-cyan/50 rounded-sm"
+                                    />
+                                    <button onClick={() => updateRules(rules.filter((_, i) => i !== rIdx))} className="text-red-500/50 hover:text-red-500 shrink-0 sm:opacity-0 group-hover/rule:opacity-100 transition-opacity">
+                                      <Trash2 size={13} />
+                                    </button>
+                                  </div>
+                                ))}
+                                <button 
+                                  onClick={() => updateRules([...rules, { logic: 'or', value: '' }])}
+                                  className="text-[10px] text-technical-cyan/70 hover:text-technical-cyan hover:bg-technical-cyan/10 self-start px-2 py-1 rounded transition-colors flex items-center gap-1"
                                 >
-                                  <option value="or">包含 (OR)</option>
-                                  <option value="and">必含 (AND)</option>
-                                  <option value="not">排除 (NOT)</option>
-                                </select>
-                                <input 
-                                  type="text"
-                                  value={rule.value}
-                                  onChange={(e) => {
-                                    const n = [...rules];
-                                    n[rIdx].value = e.target.value;
-                                    setGroups(groups.map(g => g.id === group.id ? { ...g, filter: JSON.stringify({ advanced: true, rules: n }) } : g));
-                                  }}
-                                  onBlur={() => {
-                                    const n = [...rules];
-                                    updateRules(n);
-                                  }}
-                                  placeholder="正则关键词..."
-                                  className="flex-1 min-w-0 bg-zinc-900 border border-technical-border/50 text-xs font-mono text-technical-cyan px-2 py-1 outline-none focus:border-technical-cyan/50 rounded-sm"
-                                />
-                                <button onClick={() => updateRules(rules.filter((_, i) => i !== rIdx))} className="text-red-500/50 hover:text-red-500 shrink-0 sm:opacity-0 group-hover/rule:opacity-100 transition-opacity">
-                                  <Trash2 size={13} />
+                                  <Plus size={12} /> 添加规则
                                 </button>
                               </div>
-                            ))}
-                            <button 
-                              onClick={() => updateRules([...rules, { logic: 'or', value: '' }])}
-                              className="text-[10px] text-technical-cyan/70 hover:text-technical-cyan hover:bg-technical-cyan/10 self-start px-2 py-1 rounded transition-colors flex items-center gap-1"
-                            >
-                              <Plus size={12} /> 添加规则
-                            </button>
-                          </div>
-                        );
-                      })()}
-                    </div>
-                  ) : (
-                    <input type="text" value={group.filter}
-                      onChange={(e) => setGroups(groups.map(g => g.id === group.id ? { ...g, filter: e.target.value } : g))}
-                      onBlur={(e) => handleUpdateGroup(group.id, { filter: e.target.value })}
-                      placeholder="留空则不筛选"
-                      className="flex-1 bg-black/40 border border-technical-border rounded-sm px-3 py-1 font-mono text-xs text-technical-cyan focus:outline-none focus:border-technical-cyan/30 transition-all"
-                    />
-                  )}
-                  <button
-                    onClick={() => handleFetchProxies(group.id)}
-                    disabled={loadingProxies[group.id]}
-                    className="technical-button-outline py-1 px-3 text-[10px] shrink-0 disabled:opacity-50"
-                  >
-                    {loadingProxies[group.id] ? <Activity size={12} className="animate-spin" /> : <RefreshCw size={12} />}
-                    <span className="ml-1">{loadingProxies[group.id] ? '获取中...' : '测试过滤'}</span>
-                  </button>
-                </div>
-                {proxyCache[group.id] && (
-                  <div className="bg-black/60 border border-technical-border/50 rounded p-2 text-xs font-mono max-h-40 overflow-y-auto">
-                    <div className="text-[10px] text-technical-muted mb-2 border-b border-technical-border/30 pb-1 flex justify-between">
-                      <span>总计 {proxyCache[group.id].length} 个节点</span>
-                      <span>
-                        已过滤出 {proxyCache[group.id].filter(p => {
-                          try { 
-                            const pattern = compileFilter(group.filter);
-                            return !pattern || new RegExp(pattern).test(p.name); 
-                          }
-                          catch { return false; }
-                        }).length} 个
-                      </span>
-                    </div>
-                    <div className="flex flex-wrap gap-1.5">
-                      {proxyCache[group.id].map((p, idx) => (
-                        <ProxyNodeBadge key={idx} proxy={p} filterPattern={compileFilter(group.filter)} />
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* 已选订阅源列表（支持拖拽排序） */}
-              <div className="flex flex-col bg-black/20">
-                <div className="px-4 py-2 border-b border-technical-border/20 text-[10px] font-display font-bold uppercase tracking-widest text-technical-muted">
-                  已关联订阅源 (拖拽手 Gird 排序):
-                </div>
-                {group.urls.map((entry, i) => {
-                  const key = `group-url-${group.id}-${entry.id}-${i}`;
-                  const isDragging = dragInfo?.groupId === group.id && dragInfo?.index === i;
-                  const isDragOver = dragInfo?.groupId === group.id && dragOverIndex === i;
-                  
-                  return (
-                    <div
-                      key={key}
-                      draggable={isDragging}
-                      onDragStart={(e) => {
-                        e.dataTransfer.effectAllowed = 'move';
-                      }}
-                      onDragOver={(e) => {
-                        e.preventDefault();
-                        if (dragInfo && dragInfo.groupId === group.id && dragInfo.index !== i) {
-                          setDragOverIndex(i);
-                        }
-                      }}
-                      onDragEnd={() => {
-                        if (dragInfo && dragOverIndex !== null && dragInfo.index !== dragOverIndex) {
-                          const newUrlIds = [...group.urlIds];
-                          const [removed] = newUrlIds.splice(dragInfo.index, 1);
-                          newUrlIds.splice(dragOverIndex, 0, removed);
-                          
-                          // 同时更新 urls 本地列表，保持前端显示一致
-                          const newUrls = [...group.urls];
-                          const [removedUrl] = newUrls.splice(dragInfo.index, 1);
-                          newUrls.splice(dragOverIndex, 0, removedUrl);
-
-                          setGroups(groups.map(g => g.id === group.id ? { ...g, urlIds: newUrlIds, urls: newUrls } : g));
-                          handleUpdateGroup(group.id, { urlIds: newUrlIds });
-                        }
-                        setDragInfo(null);
-                        setDragOverIndex(null);
-                      }}
-                      className={`border-b border-technical-border/30 last:border-0 transition-all ${
-                        isDragging ? 'opacity-40 bg-zinc-900/50' : ''
-                      } ${
-                        isDragOver ? 'border-t-2 border-t-technical-cyan bg-technical-cyan/5' : ''
-                      }`}
-                    >
-                      <div className="flex items-center gap-4 px-4 py-2.5 hover:bg-white/5 transition-colors">
-                        <GripVertical
-                          size={15}
-                          className="text-zinc-800 cursor-grab active:cursor-grabbing hover:text-zinc-600 shrink-0"
-                          onMouseDown={() => setDragInfo({ groupId: group.id, index: i })}
-                          onMouseUp={() => dragInfo && dragOverIndex === null && setDragInfo(null)}
+                            );
+                          })()}
+                        </div>
+                      ) : (
+                        <input type="text" value={group.filter}
+                          onChange={(e) => setGroups(groups.map(g => g.id === group.id ? { ...g, filter: e.target.value } : g))}
+                          onBlur={(e) => handleUpdateGroup(group.id, { filter: e.target.value })}
+                          placeholder="留空则不筛选"
+                          className="flex-1 bg-black/40 border border-technical-border rounded-sm px-3 py-1 font-mono text-xs text-technical-cyan focus:outline-none focus:border-technical-cyan/30 transition-all"
                         />
-                        <div className="w-5 h-5 flex items-center justify-center shrink-0">
-                          {entry.icon ? (
-                            <img
-                              src={`https://gh-proxy.com/raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/${entry.icon}.png`}
-                              alt={entry.icon}
-                              className="w-4 h-4 object-contain"
-                              onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
-                            />
-                          ) : (
-                            <span className="text-zinc-700 text-[10px]">☆</span>
-                          )}
+                      )}
+                      <button
+                        onClick={() => handleFetchProxies(group.id)}
+                        disabled={loadingProxies[group.id]}
+                        className="technical-button-outline py-1 px-3 text-[10px] shrink-0 disabled:opacity-50"
+                      >
+                        {loadingProxies[group.id] ? <Activity size={12} className="animate-spin" /> : <RefreshCw size={12} />}
+                        <span className="ml-1">{loadingProxies[group.id] ? '获取中...' : '测试过滤'}</span>
+                      </button>
+                    </div>
+                    {proxyCache[group.id] && (
+                      <div className="bg-black/60 border border-technical-border/50 rounded p-2 text-xs font-mono max-h-40 overflow-y-auto">
+                        <div className="text-[10px] text-technical-muted mb-2 border-b border-technical-border/30 pb-1 flex justify-between">
+                          <span>总计 {proxyCache[group.id].length} 个节点</span>
+                          <span>
+                            已过滤出 {proxyCache[group.id].filter(p => {
+                              try { 
+                                const pattern = compileFilter(group.filter);
+                                return !pattern || new RegExp(pattern).test(p.name); 
+                              }
+                              catch { return false; }
+                            }).length} 个
+                          </span>
                         </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="text-xs font-bold text-gray-200 truncate">{entry.name || '未命名'}</div>
-                          <div className="text-[10px] font-mono text-technical-muted truncate opacity-80 mt-0.5">{entry.url}</div>
-                        </div>
-                        <div className="flex items-center gap-3 shrink-0">
-                          {entry.proxyGroup && (
-                            <span className="px-2 py-0.5 bg-amber-900/20 border border-amber-700/30 text-[10px] font-mono text-amber-400 rounded-sm">
-                              {entry.proxyGroup}
-                            </span>
-                          )}
-                          <button
-                            onClick={() => {
-                              const newUrlIds = group.urlIds.filter(id => id !== entry.id);
-                              const newUrls = group.urls.filter(u => u.id !== entry.id);
-                              setGroups(groups.map(g => g.id === group.id ? { ...g, urlIds: newUrlIds, urls: newUrls } : g));
-                              handleUpdateGroup(group.id, { urlIds: newUrlIds });
-                            }}
-                            className="p-1 text-technical-muted hover:text-red-500 transition-colors"
-                            title="取消关联"
-                          >
-                            <Trash2 size={13} />
-                          </button>
+                        <div className="flex flex-wrap gap-1.5">
+                          {proxyCache[group.id].map((p, idx) => (
+                            <ProxyNodeBadge key={idx} proxy={p} filterPattern={compileFilter(group.filter)} />
+                          ))}
                         </div>
                       </div>
+                    )}
+                  </div>
+
+                  {/* 已选订阅源列表（支持拖拽排序） */}
+                  <div className="flex flex-col bg-black/20">
+                    <div className="px-4 py-2 border-b border-technical-border/20 text-[10px] font-display font-bold uppercase tracking-widest text-technical-muted">
+                      已关联订阅源 (拖拽手 Gird 排序):
                     </div>
-                  );
-                })}
-                {group.urlIds.length === 0 && (
-                  <div className="text-center p-6 text-[10px] text-technical-muted font-mono">暂无关联的订阅源，请在下方选择</div>
-                )}
-              </div>
-
-              {/* 订阅源勾选选择器 */}
-              <div className="p-4 border-t border-technical-border/30 bg-black/40">
-                <div className="text-[10px] font-display font-bold uppercase tracking-widest text-technical-muted mb-2">
-                  选择并关联订阅源:
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
-                  {globalUrls.map((source) => {
-                    const isChecked = group.urlIds.includes(source.id);
-                    return (
-                      <label
-                        key={source.id}
-                        className={`flex items-start gap-2.5 p-2 border rounded-sm cursor-pointer select-none transition-all ${
-                          isChecked 
-                            ? 'bg-technical-cyan/5 border-technical-cyan/40 text-gray-200' 
-                            : 'bg-zinc-900/40 border-technical-border/50 text-technical-muted hover:text-gray-300 hover:border-zinc-800'
-                        }`}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={isChecked}
-                          onChange={(e) => {
-                            let newUrlIds = [...group.urlIds];
-                            if (e.target.checked) {
-                              if (!newUrlIds.includes(source.id)) newUrlIds.push(source.id);
-                            } else {
-                              newUrlIds = newUrlIds.filter(id => id !== source.id);
-                            }
-                            
-                            // 更新 resolved urls
-                            const newUrls = newUrlIds.map(id => globalUrls.find(u => u.id === id)).filter(Boolean) as api.UrlEntry[];
-
-                            setGroups(groups.map(g => g.id === group.id ? { ...g, urlIds: newUrlIds, urls: newUrls } : g));
-                            handleUpdateGroup(group.id, { urlIds: newUrlIds });
+                    {group.urls.map((entry, i) => {
+                      const key = `group-url-${group.id}-${entry.id}-${i}`;
+                      const isDragging = dragInfo?.groupId === group.id && dragInfo?.index === i;
+                      const isDragOver = dragInfo?.groupId === group.id && dragOverIndex === i;
+                      
+                      return (
+                        <div
+                          key={key}
+                          draggable={isDragging}
+                          onDragStart={(e) => {
+                            e.dataTransfer.effectAllowed = 'move';
                           }}
-                          className="sr-only"
-                        />
-                        <div className={`w-3.5 h-3.5 border rounded-sm shrink-0 mt-0.5 flex items-center justify-center transition-colors ${
-                          isChecked ? 'bg-technical-cyan border-technical-cyan text-black' : 'border-zinc-700 bg-black'
-                        }`}>
-                          {isChecked && <span className="text-[8px] leading-none font-bold">✓</span>}
+                          onDragOver={(e) => {
+                            e.preventDefault();
+                            if (dragInfo && dragInfo.groupId === group.id && dragInfo.index !== i) {
+                              setDragOverIndex(i);
+                            }
+                          }}
+                          onDragEnd={() => {
+                            if (dragInfo && dragOverIndex !== null && dragInfo.index !== dragOverIndex) {
+                              const newUrlIds = [...group.urlIds];
+                              const [removed] = newUrlIds.splice(dragInfo.index, 1);
+                              newUrlIds.splice(dragOverIndex, 0, removed);
+                              
+                              // 同时更新 urls 本地列表，保持前端显示一致
+                              const newUrls = [...group.urls];
+                              const [removedUrl] = newUrls.splice(dragInfo.index, 1);
+                              newUrls.splice(dragOverIndex, 0, removedUrl);
+
+                              setGroups(groups.map(g => g.id === group.id ? { ...g, urlIds: newUrlIds, urls: newUrls } : g));
+                              handleUpdateGroup(group.id, { urlIds: newUrlIds });
+                            }
+                            setDragInfo(null);
+                            setDragOverIndex(null);
+                          }}
+                          className={`border-b border-technical-border/30 last:border-0 transition-all ${
+                            isDragging ? 'opacity-40 bg-zinc-900/50' : ''
+                          } ${
+                            isDragOver ? 'border-t-2 border-t-technical-cyan bg-technical-cyan/5' : ''
+                          }`}
+                        >
+                          <div className="flex items-center gap-4 px-4 py-2.5 hover:bg-white/5 transition-colors">
+                            <GripVertical
+                              size={15}
+                              className="text-zinc-800 cursor-grab active:cursor-grabbing hover:text-zinc-600 shrink-0"
+                              onMouseDown={() => setDragInfo({ groupId: group.id, index: i })}
+                              onMouseUp={() => dragInfo && dragOverIndex === null && setDragInfo(null)}
+                            />
+                            <div className="w-5 h-5 flex items-center justify-center shrink-0">
+                              {entry.icon ? (
+                                <img
+                                  src={`https://gh-proxy.com/raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/${entry.icon}.png`}
+                                  alt={entry.icon}
+                                  className="w-4 h-4 object-contain"
+                                  onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                                />
+                              ) : (
+                                <span className="text-zinc-700 text-[10px]">☆</span>
+                              )}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="text-xs font-bold text-gray-200 truncate">{entry.name || '未命名'}</div>
+                              <div className="text-[10px] font-mono text-technical-muted truncate opacity-80 mt-0.5">{entry.url}</div>
+                            </div>
+                            <div className="flex items-center gap-3 shrink-0">
+                              {entry.proxyGroup && (
+                                <span className="px-2 py-0.5 bg-amber-900/20 border border-amber-700/30 text-[10px] font-mono text-amber-400 rounded-sm">
+                                  {entry.proxyGroup}
+                                </span>
+                              )}
+                              <button
+                                onClick={() => {
+                                  const newUrlIds = group.urlIds.filter(id => id !== entry.id);
+                                  const newUrls = group.urls.filter(u => u.id !== entry.id);
+                                  setGroups(groups.map(g => g.id === group.id ? { ...g, urlIds: newUrlIds, urls: newUrls } : g));
+                                  handleUpdateGroup(group.id, { urlIds: newUrlIds });
+                                }}
+                                className="p-1 text-technical-muted hover:text-red-500 transition-colors"
+                                title="取消关联"
+                              >
+                                <Trash2 size={13} />
+                              </button>
+                            </div>
+                          </div>
                         </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="text-[11px] font-bold truncate">{source.name || '未命名'}</div>
-                          <div className="text-[9px] font-mono opacity-60 truncate mt-0.5">{source.url}</div>
-                        </div>
-                      </label>
-                    );
-                  })}
-                  {globalUrls.length === 0 && (
-                    <div className="col-span-full text-xs text-technical-muted py-2">
-                      暂无可用订阅源，请先在右上角「订阅源管理」中添加。
+                      );
+                    })}
+                    {group.urlIds.length === 0 && (
+                      <div className="text-center p-6 text-[10px] text-technical-muted font-mono">暂无关联的订阅源，请在下方选择</div>
+                    )}
+                  </div>
+
+                  {/* 订阅源勾选选择器 */}
+                  <div className="p-4 border-t border-technical-border/30 bg-black/40">
+                    <div className="text-[10px] font-display font-bold uppercase tracking-widest text-technical-muted mb-2">
+                      选择并关联订阅源:
                     </div>
-                  )}
-                </div>
-              </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
+                      {globalUrls.map((source) => {
+                        const isChecked = group.urlIds.includes(source.id);
+                        return (
+                          <label
+                            key={source.id}
+                            className={`flex items-start gap-2.5 p-2 border rounded-sm cursor-pointer select-none transition-all ${
+                              isChecked 
+                                ? 'bg-technical-cyan/5 border-technical-cyan/40 text-gray-200' 
+                                : 'bg-zinc-900/40 border-technical-border/50 text-technical-muted hover:text-gray-300 hover:border-zinc-800'
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={(e) => {
+                                let newUrlIds = [...group.urlIds];
+                                if (e.target.checked) {
+                                  if (!newUrlIds.includes(source.id)) newUrlIds.push(source.id);
+                                } else {
+                                  newUrlIds = newUrlIds.filter(id => id !== source.id);
+                                }
+                                
+                                // 更新 resolved urls
+                                const newUrls = newUrlIds.map(id => globalUrls.find(u => u.id === id)).filter(Boolean) as api.UrlEntry[];
+
+                                setGroups(groups.map(g => g.id === group.id ? { ...g, urlIds: newUrlIds, urls: newUrls } : g));
+                                handleUpdateGroup(group.id, { urlIds: newUrlIds });
+                              }}
+                              className="sr-only"
+                            />
+                            <div className={`w-3.5 h-3.5 border rounded-sm shrink-0 mt-0.5 flex items-center justify-center transition-colors ${
+                              isChecked ? 'bg-technical-cyan border-technical-cyan text-black' : 'border-zinc-700 bg-black'
+                            }`}>
+                              {isChecked && <span className="text-[8px] leading-none font-bold">✓</span>}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="text-[11px] font-bold truncate">{source.name || '未命名'}</div>
+                              <div className="text-[9px] font-mono opacity-60 truncate mt-0.5">{source.url}</div>
+                            </div>
+                          </label>
+                        );
+                      })}
+                      {globalUrls.length === 0 && (
+                        <div className="col-span-full text-xs text-technical-muted py-2">
+                          暂无可用订阅源，请先在右上角「订阅源管理」中添加。
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </>
+              )}
             </section>
           ))}
           {groups.length === 0 && (
