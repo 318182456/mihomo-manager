@@ -1797,6 +1797,12 @@ function parseNodeURIs(text: string): any[] {
         if (params.get('sid')) {
           proxy['reality-opts'] = { ...proxy['reality-opts'], 'short-id': params.get('sid') };
         }
+        if (params.get('spx')) {
+          proxy['reality-opts'] = { ...proxy['reality-opts'], 'spider-x': params.get('spx') };
+        }
+        if (params.get('pqv')) {
+          proxy['reality-opts'] = { ...proxy['reality-opts'], 'public-key-validation': params.get('pqv') };
+        }
         proxy.network = params.get('type') || 'tcp';
         if (proxy.network === 'ws') {
           proxy['ws-opts'] = { path: params.get('path') || '/', headers: { Host: params.get('host') || '' } };
@@ -1871,17 +1877,32 @@ function proxyToURI(p: any): string {
   }
   if (p.type === 'vless' || p.type === 'trojan') {
     let uri = `${p.type}://${p.type === 'vless' ? p.uuid : p.password}@${p.server}:${p.port}?type=${p.network || 'tcp'}`;
-    if (p.tls) uri += `&security=tls`;
+    const ro = p['reality-opts'] || p.reality_opts;
+    if (p.tls) {
+      if (ro || p['public-key']) {
+        uri += `&security=reality`;
+      } else {
+        uri += `&security=tls`;
+      }
+    }
     if (p.servername) uri += `&sni=${encodeURIComponent(p.servername)}`;
     else if (p.sni) uri += `&sni=${encodeURIComponent(p.sni)}`;
+    if (p.flow) uri += `&flow=${encodeURIComponent(p.flow)}`;
+    const fp = p.client_fingerprint || p['client-fingerprint'];
+    if (fp) uri += `&fp=${encodeURIComponent(fp)}`;
     
-    const ro = p['reality-opts'] || p.reality_opts;
     if (ro) {
       const pbk = ro['public-key'] || ro.publicKey || p['public-key'] || '';
       const sid = ro['short-id'] || ro.shortId || p['short-id'] || '';
+      const spx = ro['spider-x'] || ro.spiderX || p['spider-x'] || '';
+      const pqv = ro['public-key-validation'] || ro.publicKeyValidation || p['public-key-validation'] || '';
       uri += `&pbk=${encodeURIComponent(pbk)}&sid=${encodeURIComponent(sid)}`;
+      if (spx) uri += `&spx=${encodeURIComponent(spx)}`;
+      if (pqv) uri += `&pqv=${encodeURIComponent(pqv)}`;
     } else if (p['public-key']) {
       uri += `&pbk=${encodeURIComponent(p['public-key'])}&sid=${encodeURIComponent(p['short-id'] || '')}`;
+      if (p['spider-x']) uri += `&spx=${encodeURIComponent(p['spider-x'])}`;
+      if (p['public-key-validation']) uri += `&pqv=${encodeURIComponent(p['public-key-validation'])}`;
     }
     if (p['ws-opts']) uri += `&path=${encodeURIComponent(p['ws-opts'].path)}&host=${p['ws-opts'].headers?.Host || ''}`;
     return `${uri}#${name}`;
@@ -2089,15 +2110,21 @@ async function fetchProxiesFromGroup(
         const hasRo = p['reality-opts'] || p.reality_opts;
         const pbk = p['public-key'] || (hasRo ? (hasRo['public-key'] || hasRo.publicKey) : undefined);
         const sid = p['short-id'] || (hasRo ? (hasRo['short-id'] || hasRo.shortId) : undefined);
+        const spx = p['spider-x'] || (hasRo ? (hasRo['spider-x'] || hasRo.spiderX) : undefined);
+        const pqv = p['public-key-validation'] || (hasRo ? (hasRo['public-key-validation'] || hasRo.publicKeyValidation) : undefined);
         
         if (pbk) {
           p['reality-opts'] = {
             'public-key': pbk,
-            ...(sid ? { 'short-id': sid } : {})
+            ...(sid ? { 'short-id': sid } : {}),
+            ...(spx ? { 'spider-x': spx } : {}),
+            ...(pqv ? { 'public-key-validation': pqv } : {})
           };
           // 额外保留外层的 flat 字段以兼容旧版本内核/第三方 Meta 分支客户端
           p['public-key'] = pbk;
           if (sid) p['short-id'] = sid;
+          if (spx) p['spider-x'] = spx;
+          if (pqv) p['public-key-validation'] = pqv;
           
           delete p.reality_opts;
         }
