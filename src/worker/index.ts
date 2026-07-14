@@ -1262,44 +1262,132 @@ interface OptimizedIP {
   isp: string;
 }
 
+async function fetchWetestIPs(
+  activeIsps: string[],
+  ipsNum: number
+): Promise<OptimizedIP[]> {
+  const v4Url = "https://www.wetest.vip/page/cloudflare/address_v4.html";
+  const v6Url = "https://www.wetest.vip/page/cloudflare/address_v6.html";
+
+  const showCt = activeIsps.includes('ct');
+  const showCu = activeIsps.includes('cu');
+  const showCmcc = activeIsps.includes('cmcc');
+
+  const parseWetest = async (url: string): Promise<OptimizedIP[]> => {
+    try {
+      const response = await fetch(url, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+        }
+      });
+      if (!response.ok) return [];
+      const html = await response.text();
+      const results: OptimizedIP[] = [];
+      const rowRegex = /<tr[\s\S]*?<\/tr>/g;
+      const cellRegex = /<td data-label="线路名称">(.+?)<\/td>[\s\S]*?<td data-label="优选地址">([\d.:a-fA-F]+)<\/td>[\s\S]*?<td data-label="数据中心">(.+?)<\/td>/;
+
+      let match;
+      while ((match = rowRegex.exec(html)) !== null) {
+        const rowHtml = match[0];
+        const cellMatch = rowHtml.match(cellRegex);
+        if (cellMatch && cellMatch[1] && cellMatch[2]) {
+          const ispRaw = cellMatch[1].trim().replace(/<.*?>/g, '');
+          const ip = cellMatch[2].trim();
+
+          let isp = '';
+          if (ispRaw.includes('电信')) {
+            if (!showCt) continue;
+            isp = '电信';
+          } else if (ispRaw.includes('联通')) {
+            if (!showCu) continue;
+            isp = '联通';
+          } else if (ispRaw.includes('移动')) {
+            if (!showCmcc) continue;
+            isp = '移动';
+          } else {
+            continue;
+          }
+
+          results.push({ ip, isp });
+        }
+      }
+      return results;
+    } catch (e) {
+      console.error('[CF IP] Wetest 解析出错:', e);
+      return [];
+    }
+  };
+
+  try {
+    console.log('[CF IP] 尝试从 wetest.vip 获取备用优选 IP...');
+    const [v4List, v6List] = await Promise.all([
+      parseWetest(v4Url),
+      parseWetest(v6Url)
+    ]);
+    const allList = [...v4List, ...v6List];
+
+    const teleIPs = allList.filter(item => item.isp === '电信').slice(0, ipsNum);
+    const unicIPs = allList.filter(item => item.isp === '联通').slice(0, ipsNum);
+    const mobiIPs = allList.filter(item => item.isp === '移动').slice(0, ipsNum);
+
+    const interleavedIps: OptimizedIP[] = [];
+    const maxLength = Math.max(teleIPs.length, unicIPs.length, mobiIPs.length);
+    for (let i = 0; i < maxLength; i++) {
+      if (i < teleIPs.length) interleavedIps.push(teleIPs[i]);
+      if (i < unicIPs.length) interleavedIps.push(unicIPs[i]);
+      if (i < mobiIPs.length) interleavedIps.push(mobiIPs[i]);
+    }
+    return interleavedIps;
+  } catch (e) {
+    console.error('[CF IP] Wetest 获取备用 IP 失败:', e);
+    return [];
+  }
+}
+
 async function fetchCloudflareOptimizedIPs(
   env: Env, 
   ispParam?: string | null,
   ipsParam?: string | null
 ): Promise<OptimizedIP[]> {
+  const activeIsps = ispParam ? ispParam.split(',').map(s => s.trim().toLowerCase()) : ['ct', 'cu', 'cmcc'];
+  const showCt = activeIsps.includes('ct');
+  const showCu = activeIsps.includes('cu');
+  const showCmcc = activeIsps.includes('cmcc');
+  const ipsNum = parseInt(ipsParam || '6', 10) || 6;
+
   try {
     console.log('[CF IP] 开始从 cf.090227.xyz 获取优选 IP...');
 
-    const activeIsps = ispParam ? ispParam.split(',').map(s => s.trim().toLowerCase()) : ['ct', 'cu', 'cmcc'];
-    const showCt = activeIsps.includes('ct');
-    const showCu = activeIsps.includes('cu');
-    const showCmcc = activeIsps.includes('cmcc');
-    const ipsNum = parseInt(ipsParam || '6', 10) || 6;
-
     const fetchIPsForISP = async (url: string, ispName: string): Promise<OptimizedIP[]> => {
-      const res = await fetch(url, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+      try {
+        const res = await fetch(url, {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+          }
+        });
+        if (!res.ok) {
+          console.warn(`[CF IP] HTTP ${res.status} for ${ispName}`);
+          return [];
         }
-      });
-      if (!res.ok) {
-        throw new Error(`HTTP ${res.status} for ${ispName}`);
-      }
-      const text = await res.text();
-      const lines = text.split('\n');
-      const ips: OptimizedIP[] = [];
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed) continue;
-        const parts = trimmed.split('#');
-        if (parts[0]) {
-          ips.push({
-            ip: parts[0].trim(),
-            isp: ispName
-          });
+        const text = await res.text();
+        const lines = text.split('\n');
+        const ips: OptimizedIP[] = [];
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed) continue;
+          const parts = trimmed.split('#');
+          if (parts[0]) {
+            ips.push({
+              ip: parts[0].trim(),
+              isp: ispName
+            });
+          }
         }
+        return ips;
+      } catch (e) {
+        console.warn(`[CF IP] 获取 ${ispName} 优选 IP 异常:`, e);
+        return [];
       }
-      return ips;
     };
 
     const tasks: Promise<OptimizedIP[]>[] = [];
@@ -1322,13 +1410,17 @@ async function fetchCloudflareOptimizedIPs(
       if (i < mobiIPs.length) interleavedIps.push(mobiIPs[i]);
     }
 
-    console.log(`[CF IP] 成功获取了 ${interleavedIps.length} 个 IP (电信:${teleIPs.length}, 联通:${unicIPs.length}, 移动:${mobiIPs.length})`);
-    return interleavedIps;
+    if (interleavedIps.length > 0) {
+      console.log(`[CF IP] 成功获取了 ${interleavedIps.length} 个 IP (电信:${teleIPs.length}, 联通:${unicIPs.length}, 移动:${mobiIPs.length})`);
+      return interleavedIps;
+    }
+    console.warn('[CF IP] 从 cf.090227.xyz 未获取到任何 IP，准备尝试备用源。');
   } catch (e) {
     console.error('[CF IP] 获取优选 IP 异常:', e);
   }
 
-  return [];
+  // 降级使用 wetest.vip 备用源
+  return await fetchWetestIPs(activeIsps, ipsNum);
 }
 
 interface SubscriptionCache {
