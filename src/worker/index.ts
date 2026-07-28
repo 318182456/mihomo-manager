@@ -847,6 +847,27 @@ async function handleAPI(request: Request, env: Env, pathname: string, ctx: Exec
           }
           return ok({ success: true, host, ip, blocked: null, cached: false });
         }
+        // POST /api/gfw/batch  批量读取缓存状态，不触发实际探测
+        if (method === 'POST' && id === 'batch') {
+          const body: any = await request.json().catch(() => ({}));
+          const hosts: string[] = Array.isArray(body.hosts) ? body.hosts : [];
+          if (hosts.length === 0) return ok({ success: true, results: [] });
+
+          // 去重后并发解析，单次上限 200 个，避免打爆子请求配额
+          const unique = [...new Set(hosts.filter(Boolean))].slice(0, 200);
+          const results = await Promise.all(unique.map(async (host) => {
+            try {
+              const ip = await resolveDomainToIp(host);
+              const cached = await env.KV.get(`gfw_status:${ip}`);
+              if (!cached) return { host, ip, blocked: null, updatedAt: undefined };
+              const parsed = JSON.parse(cached);
+              return { host, ip, blocked: parsed.blocked as boolean, updatedAt: parsed.updatedAt as number };
+            } catch {
+              return { host, ip: host, blocked: null, updatedAt: undefined };
+            }
+          }));
+          return ok({ success: true, results });
+        }
         if (method === 'POST' && id === 'update') {
           const body: any = await request.json().catch(() => ({}));
           const host = body.host || body.ip || body.server;

@@ -4,7 +4,12 @@
     // Worker 运行在 CF edge，不使用浏览器 DOM API
     "lib": ["ES2022"],
     "types": ["@cloudflare/workers-types"],
+    // 这两项仅对前端新代码开启；worker 内有既有的未使用变量，不在本次重写范围内
+    "noUnusedLocals": false,
+    "noUnusedParameters": false,
     "noEmit": true
   },
-  "include": ["index.ts"]
+  "include": ["index.ts"],
+  // 覆盖根配置的 exclude（其路径针对项目根，会误伤本目录）
+  "exclude": []
 }
