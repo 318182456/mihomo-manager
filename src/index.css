@@ -1,58 +1,167 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
 @import "tailwindcss";
 
+/*
+ * 设计令牌
+ * 中性专业配色：石墨灰底 + 蓝色强调。
+ * 字号阶梯最小 12px，不再使用 9px/10px。
+ */
 @theme {
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
-  --font-display: "Space Grotesk", sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
 
-  /* 主题色（暗色模式 - Dracula 配色） */
-  --color-technical-bg: #21222c; /* Dracula background darker */
-  --color-technical-surface: #282a36; /* Dracula default background */
-  --color-technical-border: #44475a; /* Dracula current line / selection */
-  --color-technical-cyan: #8be9fd; /* Dracula cyan */
-  --color-technical-cyan-dim: rgba(139, 233, 253, 0.15);
-  --color-technical-muted: #6272a4; /* Dracula comment */
+  /* 层次：canvas 最深，raised 最浅，用于卡片堆叠 */
+  --color-canvas: #0b0c0e;
+  --color-surface: #131519;
+  --color-raised: #1a1d22;
+  --color-overlay: #21252b;
+
+  /* 描边 */
+  --color-line: #262a31;
+  --color-line-strong: #343a44;
+
+  /* 文本 */
+  --color-fg: #e6e8eb;
+  --color-fg-muted: #9aa2ad;
+  --color-fg-subtle: #6b7280;
+
+  /* 强调色 */
+  --color-accent: #3b82f6;
+  --color-accent-hover: #60a5fa;
+  --color-accent-soft: rgba(59, 130, 246, 0.12);
+
+  /* 语义色 */
+  --color-success: #22c55e;
+  --color-warning: #f59e0b;
+  --color-danger: #ef4444;
+  --color-success-soft: rgba(34, 197, 94, 0.12);
+  --color-warning-soft: rgba(245, 158, 11, 0.12);
+  --color-danger-soft: rgba(239, 68, 68, 0.12);
+
+  /* 圆角 */
+  --radius-card: 8px;
+  --radius-control: 6px;
 }
 
 @layer base {
-  html, body {
-    @apply overflow-hidden w-full h-full;
+  html, body, #root {
+    height: 100%;
   }
-  
+
   body {
-    @apply bg-technical-bg text-[#f8f8f2] font-sans antialiased selection:bg-technical-cyan/30;
+    @apply bg-canvas text-fg font-sans antialiased;
+    font-size: 14px;
+    line-height: 1.5;
   }
 
-  /* 隐藏所有元素的横纵滚动条，但保留滚动功能 */
+  /* 恢复滚动条 —— 细但可见，能看出内容可滚动 */
   * {
-    scrollbar-width: none !important;
-    -ms-overflow-style: none !important;
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-line-strong) transparent;
   }
-  
+
   ::-webkit-scrollbar {
-    display: none !important;
-    width: 0 !important;
-    height: 0 !important;
+    width: 10px;
+    height: 10px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: var(--color-line-strong);
+    border-radius: 999px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: #454b57;
+    background-clip: content-box;
+  }
+
+  ::selection {
+    background: var(--color-accent-soft);
+  }
+
+  /* 统一焦点环，替代各处手写的 focus:ring */
+  :focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+  }
+
+  /* 数字输入框去掉步进箭头 */
+  input[type="number"]::-webkit-outer-spin-button,
+  input[type="number"]::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+  input[type="number"] {
+    -moz-appearance: textfield;
   }
 }
 
-.glow-cyan {
-  box-shadow: 0 0 15px rgba(139, 233, 253, 0.3);
+@layer components {
+  .card {
+    @apply bg-surface border border-line rounded-[var(--radius-card)];
+  }
+
+  /* 表单控件基线：所有 input/select/textarea 共用 */
+  .control {
+    @apply w-full bg-canvas border border-line rounded-[var(--radius-control)]
+           px-3 py-2 text-sm text-fg placeholder:text-fg-subtle
+           transition-colors;
+  }
+  .control:hover:not(:disabled):not(:focus) {
+    border-color: var(--color-line-strong);
+  }
+  .control:focus {
+    @apply outline-none border-accent;
+    box-shadow: 0 0 0 3px var(--color-accent-soft);
+  }
+  .control:disabled {
+    @apply opacity-50 cursor-not-allowed;
+  }
+
+  .control-mono {
+    @apply font-mono text-[13px];
+  }
 }
 
-.technical-card {
-  @apply bg-technical-surface border border-technical-border rounded-xl overflow-hidden transition-all duration-300 hover:border-technical-cyan/50 hover:shadow-lg hover:shadow-technical-cyan/10;
+/* CodeMirror 与整体主题对齐 */
+.cm-editor {
+  height: 100%;
+  font-size: 13px;
+}
+.cm-editor.cm-focused {
+  outline: none !important;
+}
+.cm-scroller {
+  font-family: var(--font-mono) !important;
 }
 
-.technical-input {
-  @apply bg-[#21222c] border border-technical-border rounded-lg px-3 py-1.5 font-mono text-sm text-[#f8f8f2] focus:outline-none focus:border-technical-cyan focus:ring-1 focus:ring-technical-cyan/50 transition-all;
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes slide-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes slide-in-left {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(0); }
 }
 
-.technical-button-primary {
-  @apply font-display text-xs uppercase tracking-widest px-4 py-2 rounded-lg transition-all active:scale-95 flex items-center justify-center gap-2 outline-none bg-technical-cyan text-[#282a36] font-bold hover:brightness-110 hover:shadow-[0_0_20px_rgba(139,233,253,0.4)];
-}
+.animate-fade-in { animation: fade-in 0.15s ease-out; }
+.animate-slide-up { animation: slide-up 0.2s ease-out; }
+/* 左侧导航抽屉：从左边缘滑入 */
+.animate-slide-in-left { animation: slide-in-left 0.25s cubic-bezier(0.32, 0.72, 0, 1); }
 
-.technical-button-outline {
-  @apply font-display text-xs uppercase tracking-widest px-4 py-2 rounded-lg transition-all active:scale-95 flex items-center justify-center gap-2 outline-none border border-technical-border text-technical-muted hover:border-technical-cyan hover:text-technical-cyan hover:bg-technical-cyan/10;
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
 }

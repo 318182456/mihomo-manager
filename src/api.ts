@@ -72,6 +72,32 @@ export interface PasskeyItem {
   id: string; name: string; createdAt: string;
 }
 
+/** 订阅源中的单个代理节点 */
+export interface ProxyNode {
+  name: string;
+  server: string;
+  type?: string;
+  port?: number;
+}
+
+/** GFW 检测状态：null 表示尚未检测过 */
+export type GfwState = boolean | null;
+
+export interface GfwResult {
+  host: string;
+  ip?: string;
+  blocked: GfwState;
+  updatedAt?: number;
+}
+
+/** Gcore 测速结果 */
+export interface GcoreIp {
+  ip: string;
+  latency: number;
+  loss: number;
+  updatedAt?: number;
+}
+
 // ---------- Token 持久化 ----------
 
 const TOKEN_KEY = 'mihomo_token';
@@ -177,7 +203,7 @@ export const refreshSubscription = (id: string) =>
 export const refreshUrlEntry = (groupId: string, urlIndex: number) =>
   apiFetch<{ ok: boolean; url: string }>(`/api/subscriptions/${groupId}/urls/${urlIndex}/refresh`, { method:'POST' });
 export const getSubscriptionProxies = (id: string) =>
-  apiFetch<{ name: string; server: string }[]>(`/api/subscriptions/${id}/proxies`);
+  apiFetch<ProxyNode[]>(`/api/subscriptions/${id}/proxies`);
 
 // ---------- Global URLs ----------
 
@@ -193,7 +219,7 @@ export const refreshUrl = (id: string) =>
 export const syncUrlCache = (id: string) =>
   apiFetch<{ ok: boolean; msg: string }>(`/api/urls/${id}/sync_cache`, { method:'POST' });
 export const getUrlProxies = (id: string) =>
-  apiFetch<{ name: string; type: string; server: string; port: number }[]>(`/api/urls/${id}/proxies`);
+  apiFetch<ProxyNode[]>(`/api/urls/${id}/proxies`);
 
 // ---------- Templates ----------
 
@@ -220,9 +246,26 @@ export const buildSubUrl = (token: string) =>
 
 // ---------- GFW / IP status ----------
 
+/** 读取单个主机的缓存状态（不触发探测） */
 export const checkGfwStatus = (host: string) =>
-  apiFetch<{ success: boolean; host: string; ip?: string; blocked: boolean | null; cached: boolean; updatedAt?: number }>(`/api/gfw/status?host=${encodeURIComponent(host)}`);
+  apiFetch<{ success: boolean; host: string; ip?: string; blocked: GfwState; cached: boolean; updatedAt?: number }>(
+    `/api/gfw/status?host=${encodeURIComponent(host)}`
+  );
 
+/**
+ * 批量读取缓存状态。一次请求覆盖整个节点列表，
+ * 取代此前每个节点各发一次请求的做法。
+ */
+export async function batchGfwStatus(hosts: string[]): Promise<Map<string, GfwResult>> {
+  if (hosts.length === 0) return new Map();
+  const data = await apiFetch<{ success: boolean; results: GfwResult[] }>('/api/gfw/batch', {
+    method: 'POST',
+    body: JSON.stringify({ hosts }),
+  });
+  return new Map(data.results.map(r => [r.host, r]));
+}
+
+/** 触发真实探测（经 Globalping，耗时数秒） */
 export const runGfwCheck = (host: string) =>
   apiFetch<{ success: boolean; host: string; ip?: string; blocked: boolean }>(`/api/gfw/check`, {
     method: 'POST',
@@ -238,7 +281,7 @@ export const updateGfwStatus = (host: string, blocked: boolean) =>
 // ---------- Gcore ----------
 
 export const getGcoreOptimizedIps = () =>
-  apiFetch<any[]>('/api/gcore/optimized-ips');
+  apiFetch<GcoreIp[]>('/api/gcore/optimized-ips');
 
 export const runGcoreSpeedtest = () =>
   apiFetch<{ success: boolean; message: string }>('/api/gcore/speedtest', { method: 'POST' });
