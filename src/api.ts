@@ -47,6 +47,7 @@ export interface UrlEntry {
   cfOptimizeIsp?: string;
   relayRules?: string;
   excludeRelayed?: boolean;
+  proxyUrl?: string;
 }
 
 export interface SubscriptionGroup {

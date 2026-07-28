@@ -1564,6 +1564,25 @@ function SubscriptionsView() {
                           </label>
                         </div>
                       </div>
+
+                      <div className="mt-2">
+                        <label className="block text-[9px] font-display text-technical-muted uppercase tracking-widest mb-1">
+                          代理中转地址 (proxyUrl - 选填，支持 {"{{URL}}"} 占位符)
+                        </label>
+                        <input
+                          type="text"
+                          value={source.proxyUrl ?? ''}
+                          onChange={(e) => setGlobalUrls(globalUrls.map(u => u.id === source.id ? { ...u, proxyUrl: e.target.value } : u))}
+                          onBlur={(e) => {
+                            const val = e.target.value.trim() || null;
+                            // null 显式发送到服务端以清除该字段（undefined 会被 JSON.stringify 忽略）
+                            handleUpdateSource(source.id, { proxyUrl: val as any });
+                            if (!val) setGlobalUrls(globalUrls.map(u => u.id === source.id ? { ...u, proxyUrl: undefined } : u));
+                          }}
+                          placeholder="例如: http://<您的VPS_IP>:8080/?url= 或 https://cors-anywhere.herokuapp.com/{{URL}}"
+                          className="w-full bg-black/40 border border-technical-border rounded-sm px-2.5 py-1.5 font-mono text-xs text-gray-300 focus:outline-none focus:border-technical-cyan/50"
+                        />
+                      </div>
                     </div>
 
                     {/* Hysteria 2 parameters */}

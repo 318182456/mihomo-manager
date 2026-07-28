@@ -209,6 +209,7 @@ export interface UrlEntry {
   cfOptimizeIsp?: string;
   relayRules?: string;
   excludeRelayed?: boolean;
+  proxyUrl?: string;
 }
 
 export interface SubscriptionGroup {
@@ -449,7 +450,16 @@ async function fetchAndExtractUrl(entry: UrlEntry): Promise<{ ok: boolean; url?:
 
   let resp: Response;
   try {
-    resp = await fetchWithTimeout(urlToFetch, {
+    let targetUrl = urlToFetch;
+    if (entry.proxyUrl) {
+      if (entry.proxyUrl.includes('{{URL}}')) {
+        targetUrl = entry.proxyUrl.replace('{{URL}}', encodeURIComponent(urlToFetch));
+      } else {
+        targetUrl = `${entry.proxyUrl}${encodeURIComponent(urlToFetch)}`;
+      }
+      console.log(`[fetchAndExtractUrl] 使用代理中转请求: ${targetUrl}`);
+    }
+    resp = await fetchWithTimeout(targetUrl, {
       headers: {
         'Accept': 'application/json',
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
@@ -957,7 +967,16 @@ async function handleUrls(req: Request, kv: KVNamespace, method: string, id: str
     if (idx === -1) return err404();
     const body = await req.json<Partial<UrlEntry>>();
     delete (body as any).id;
-    list[idx] = { ...list[idx], ...body };
+    // null 值表示删除该字段
+    const merged = { ...list[idx] };
+    for (const [k, v] of Object.entries(body)) {
+      if (v === null) {
+        delete (merged as any)[k];
+      } else {
+        (merged as any)[k] = v;
+      }
+    }
+    list[idx] = merged as UrlEntry;
     await kv.put('subscription_urls', JSON.stringify(list));
     return ok(list[idx]);
   }
@@ -1504,11 +1523,21 @@ async function updateSubscriptionCache(
 
   // 辅助函数：拉取单个 URL
   const fetchOne = async (url: string) => {
-    console.log(`[Cache Sync] 正在发起 fetch 请求: ${url}`);
+    let targetUrl = url;
+    if (entry.proxyUrl) {
+      if (entry.proxyUrl.includes('{{URL}}')) {
+        targetUrl = entry.proxyUrl.replace('{{URL}}', encodeURIComponent(url));
+      } else {
+        targetUrl = `${entry.proxyUrl}${encodeURIComponent(url)}`;
+      }
+      console.log(`[Cache Sync] 使用代理中转请求: ${targetUrl}`);
+    } else {
+      console.log(`[Cache Sync] 正在发起 fetch 请求: ${url}`);
+    }
     const controller = new AbortController();
     const id = setTimeout(() => controller.abort(), 6000); // 6秒超时保护
     try {
-      const response = await fetch(url, {
+      const response = await fetch(targetUrl, {
         signal: controller.signal,
         headers: {
           'User-Agent': userAgent,
