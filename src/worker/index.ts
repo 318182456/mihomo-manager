@@ -2064,6 +2064,10 @@ function simplifyNodeName(name: string): string {
   s = s.replace(/\s*\+\s*Reality/gi, '');
   s = s.replace(/\s*\+\s*WS/gi, '');
   s = s.replace(/\s*\+\s*TLS/gi, '');
+  // 去掉日期样式的连续数字串（8 位以上，如 20260727220930），
+  // 以及紧跟其后的构建哈希后缀；一并吃掉前置分隔符，避免留下 "DE-tu5-"
+  s = s.replace(/[-_\s]*\d{8,}[0-9a-z]*/gi, '');
+  s = s.replace(/[-_\s]+$/g, '');
   s = s.replace(/\s+/g, ' ').trim();
   return s;
 }
