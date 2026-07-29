@@ -1964,6 +1964,30 @@ function parseNodeURIs(text: string): any[] {
         if (params.get('up')) proxy.up = params.get('up');
         if (params.get('down')) proxy.down = params.get('down');
         if (params.get('mtu')) proxy.mtu = parseInt(params.get('mtu')!, 10);
+      } else if (protocol === 'anytls') {
+        proxy.type = 'anytls';
+        proxy.server = url.hostname; proxy.port = parseInt(url.port, 10);
+        proxy.password = url.username;
+        const params = url.searchParams;
+        if (params.get('sni')) {
+          proxy.sni = params.get('sni');
+          proxy.servername = params.get('sni');
+        }
+        if (params.get('allowInsecure') === '1' || params.get('insecure') === '1') {
+          proxy['skip-cert-verify'] = true;
+        }
+        if (params.get('fp')) {
+          proxy.client_fingerprint = params.get('fp');
+        }
+        if (params.get('idle_session_check_interval')) {
+          proxy.idle_session_check_interval = parseInt(params.get('idle_session_check_interval')!, 10);
+        }
+        if (params.get('idle_session_timeout')) {
+          proxy.idle_session_timeout = parseInt(params.get('idle_session_timeout')!, 10);
+        }
+        if (params.get('min_idle_session')) {
+          proxy.min_idle_session = parseInt(params.get('min_idle_session')!, 10);
+        }
       } else if (protocol === 'tuic') {
         proxy.server = url.hostname; proxy.port = parseInt(url.port, 10);
         proxy.uuid = url.username; proxy.password = url.password;
@@ -2051,6 +2075,14 @@ function proxyToURI(p: any): string {
   }
   if (p.type === 'hysteria2') {
     return `hysteria2://${p.password}@${p.server}:${p.port}?sni=${p.sni || ''}#${name}`;
+  }
+  if (p.type === 'anytls') {
+    let uri = `anytls://${p.password}@${p.server}:${p.port}?sni=${p.sni || p.servername || ''}&allowInsecure=${p['skip-cert-verify'] ? 1 : 0}`;
+    if (p.client_fingerprint) uri += `&fp=${encodeURIComponent(p.client_fingerprint)}`;
+    if (p.idle_session_check_interval) uri += `&idle_session_check_interval=${p.idle_session_check_interval}`;
+    if (p.idle_session_timeout) uri += `&idle_session_timeout=${p.idle_session_timeout}`;
+    if (p.min_idle_session) uri += `&min_idle_session=${p.min_idle_session}`;
+    return `${uri}#${name}`;
   }
   if (p.type === 'tuic') {
     return `tuic://${p.uuid}:${p.password}@${p.server}:${p.port}?alpn=${(p.alpn || []).join(',')}&congestion_control=${p['congestion-controller'] || ''}#${name}`;
