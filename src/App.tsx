@@ -13,6 +13,7 @@ import { SubscriptionsView } from './views/SubscriptionsView';
 import { TemplatesView } from './views/TemplatesView';
 import { LinksView } from './views/LinksView';
 import { PasskeysView } from './views/PasskeysView';
+import { AiView } from './views/AiView';
 
 export default function App() {
   return (
@@ -91,6 +92,7 @@ function Shell({ onLogout }: { onLogout: () => void }) {
       case 'subscriptions': return <SubscriptionsView />;
       case 'templates':     return <TemplatesView />;
       case 'links':         return <LinksView />;
+      case 'ai':            return <AiView />;
       case 'passkeys':      return <PasskeysView />;
     }
   };

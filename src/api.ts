@@ -13,6 +13,8 @@ export interface UrlEntry {
   proxyGroup?: string;
   /** 分组图标文件名（不含扩展名），如 Auto、Speedtest，前缀固定为 Qure/IconSet/Color/ */
   icon?: string;
+  /** 节点本身走 Cloudflare，会被 CF 相关分组排除 */
+  isCloudflare?: boolean;
   refreshUrl?: string;
   refreshHeaders?: Record<string, string>;
   refreshJsonPath?: string;
@@ -286,3 +288,59 @@ export const getGcoreOptimizedIps = () =>
 export const runGcoreSpeedtest = () =>
   apiFetch<{ success: boolean; message: string }>('/api/gcore/speedtest', { method: 'POST' });
 
+// ---------- AI 助手 ----------
+
+export interface AiStatus { configured: boolean; model: string | null }
+export interface AiUsage { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number }
+
+export interface AiGroupAdvice {
+  name: string;
+  action: "keep" | "replace";
+  reason: string;
+  suggestedUse: string;
+  /** 代码侧判定该组是否真的引用了 provider */
+  usesProvider: boolean;
+  /** AI 结论与代码判定不符，需人工复核 */
+  mismatch: boolean;
+}
+
+export interface AiSplitResult {
+  sections: { key: string; lines: number; chars: number }[];
+  groups: AiGroupAdvice[];
+  usage?: AiUsage;
+}
+
+export interface AiEditResult {
+  kind: "edit" | "answer";
+  answer: string;
+  content: string;
+  usage?: AiUsage;
+}
+
+export interface AiChatTurn { role: "user" | "assistant"; content: string }
+
+export const getAiStatus = () => apiFetch<AiStatus>("/api/ai/status");
+
+export const getAiModels = () =>
+  apiFetch<{ models: string[]; current: string }>("/api/ai/models");
+
+export const aiSplit = (content: string, model?: string) =>
+  apiFetch<AiSplitResult>("/api/ai/split", {
+    method: "POST",
+    body: JSON.stringify({ content, model }),
+  });
+
+export const aiEdit = (
+  name: string, content: string, instruction: string,
+  model?: string, history: AiChatTurn[] = [],
+) =>
+  apiFetch<AiEditResult>("/api/ai/edit", {
+    method: "POST",
+    body: JSON.stringify({ name, content, instruction, model, history }),
+  });
+
+export const aiAsk = (question: string, model?: string, history: AiChatTurn[] = []) =>
+  apiFetch<{ text: string; usage?: AiUsage }>("/api/ai/ask", {
+    method: "POST",
+    body: JSON.stringify({ question, model, history }),
+  });

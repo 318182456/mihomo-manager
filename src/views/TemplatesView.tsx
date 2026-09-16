@@ -3,18 +3,23 @@ import CodeMirror from '@uiw/react-codemirror';
 import { yaml } from '@codemirror/lang-yaml';
 import { dracula } from '@uiw/codemirror-theme-dracula';
 import jsyaml from 'js-yaml';
-import { Plus, Trash2, Save, FileCode2, CheckCircle2, XCircle, Circle } from 'lucide-react';
+import { Plus, Trash2, Save, FileCode2, CheckCircle2, XCircle, Circle, Upload, Sparkles } from 'lucide-react';
 import * as api from '../api';
 import { Button, IconButton } from '../ui/Button';
 import { EmptyState, LoadingState } from '../ui/Layout';
 import { useToast } from '../ui/Toast';
 import { useDialog } from '../ui/Dialog';
+import { AiPanel } from './components/AiPanel';
 
 export function TemplatesView() {
   const [templates, setTemplates] = useState<api.Template[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [dragging, setDragging] = useState(false);
+  const [aiOpen, setAiOpen] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   /** 已保存内容的快照，用于判定「有未保存修改」 */
   const savedRef = useRef<Map<string, { name: string; content: string }>>(new Map());
   const [dirtyIds, setDirtyIds] = useState<Set<string>>(new Set());
@@ -119,6 +124,81 @@ export function TemplatesView() {
     setActiveId(id);
   };
 
+  /** 上传 .yaml 文件为新模板。同名模板走覆盖确认，避免误删已有内容。 */
+  const uploadFiles = async (files: File[]) => {
+    const yamlFiles = files.filter(f => /\.(ya?ml)$/i.test(f.name));
+    if (yamlFiles.length === 0) {
+      toast.error('请选择 .yaml 或 .yml 文件');
+      return;
+    }
+
+    setUploading(true);
+    let created = 0, updated = 0, lastId: string | null = null;
+    try {
+      for (const file of yamlFiles) {
+        const content = await file.text();
+        // 模板名去掉扩展名，与 INCLUDE 的引用方式保持一致
+        const name = file.name.replace(/\.(ya?ml)$/i, '');
+
+        try {
+          jsyaml.load(content);
+        } catch (e) {
+          const go = await dialog.confirm({
+            title: `「${file.name}」YAML 语法有误`,
+            description: `${e instanceof Error ? e.message : String(e)}
+
+片段模板（含 {{...}} 占位符）出现此提示通常是正常的，仍可继续上传。`,
+            confirmLabel: '仍然上传',
+          });
+          if (!go) continue;
+        }
+
+        const exist = templates.find(t => t.name === name);
+        if (exist) {
+          const ok = await dialog.confirm({
+            title: `覆盖模板「${name}」？`,
+            description: '该名称的模板已存在，上传将替换其全部内容。此操作不可撤销。',
+            confirmLabel: '覆盖',
+            danger: true,
+          });
+          if (!ok) continue;
+          await api.updateTemplate(exist.id, { name, content });
+          setTemplates(ts => ts.map(t => (t.id === exist.id ? { ...t, name, content } : t)));
+          savedRef.current.set(exist.id, { name, content });
+          setDirtyIds(prev => {
+            const s = new Set(prev);
+            s.delete(exist.id);
+            return s;
+          });
+          lastId = exist.id;
+          updated++;
+        } else {
+          const tpl = await api.createTemplate({ name, content });
+          setTemplates(ts => [...ts, tpl]);
+          savedRef.current.set(tpl.id, { name: tpl.name, content: tpl.content });
+          lastId = tpl.id;
+          created++;
+        }
+      }
+
+      if (lastId) setActiveId(lastId);
+      if (created || updated) {
+        toast.success(`已上传 ${created + updated} 个模板`,
+          [created && `新建 ${created}`, updated && `覆盖 ${updated}`].filter(Boolean).join(' · '));
+      }
+    } catch (e) {
+      toast.error('上传失败', e instanceof Error ? e.message : undefined);
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleFilePick = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? []);
+    e.target.value = '';                                   // 复位，允许重复上传同一文件
+    if (files.length) uploadFiles(files);
+  };
+
   const handleCreate = async () => {
     const result = await dialog.prompt({
       title: '新建模板',
@@ -164,12 +244,51 @@ export function TemplatesView() {
   if (loading) return <LoadingState />;
 
   return (
-    <div className="flex h-full min-h-0">
+    <div
+      className="relative flex h-full min-h-0"
+      onDragEnter={(e) => { e.preventDefault(); setDragging(true); }}
+      onDragOver={(e) => e.preventDefault()}
+      onDragLeave={(e) => {
+        // 仅在离开容器本身时关闭，避免子元素间移动触发闪烁
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragging(false);
+      }}
+      onDrop={(e) => {
+        e.preventDefault();
+        setDragging(false);
+        const files = Array.from(e.dataTransfer.files ?? []);
+        if (files.length) uploadFiles(files);
+      }}
+    >
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".yaml,.yml"
+        multiple
+        onChange={handleFilePick}
+        className="hidden"
+      />
+
+      {dragging && (
+        <div className="absolute inset-0 z-20 flex items-center justify-center
+                        bg-accent-soft/80 border-2 border-dashed border-accent
+                        rounded-[var(--radius-control)] pointer-events-none">
+          <div className="flex flex-col items-center gap-2 text-accent">
+            <Upload size={28} />
+            <span className="text-sm font-medium">松开以上传模板</span>
+            <span className="text-xs opacity-70">支持 .yaml / .yml，可多选</span>
+          </div>
+        </div>
+      )}
+
       {/* 模板列表 */}
       <aside className="hidden lg:flex w-56 shrink-0 flex-col border-r border-line bg-surface">
         <div className="h-12 shrink-0 px-3 flex items-center justify-between border-b border-line">
           <span className="text-xs font-medium text-fg-muted uppercase tracking-wide">模板</span>
-          <IconButton label="新建模板" icon={<Plus size={15} />} onClick={handleCreate} />
+          <div className="flex items-center gap-0.5">
+            <IconButton label="上传 YAML" icon={<Upload size={15} />}
+                        onClick={() => fileInputRef.current?.click()} disabled={uploading} />
+            <IconButton label="新建模板" icon={<Plus size={15} />} onClick={handleCreate} />
+          </div>
         </div>
         <div className="flex-1 overflow-y-auto p-2">
           {templates.map(tpl => {
@@ -235,10 +354,19 @@ export function TemplatesView() {
               <div className="hidden lg:block lg:flex-none" />
 
               <div className="flex items-center gap-1 sm:gap-2 shrink-0">
+                <IconButton label="上传 YAML" icon={<Upload size={16} />}
+                            onClick={() => fileInputRef.current?.click()} disabled={uploading}
+                            className="lg:hidden" />
                 <IconButton label="新建模板" icon={<Plus size={16} />} onClick={handleCreate}
                             className="lg:hidden" />
                 <IconButton label="删除模板" icon={<Trash2 size={16} />} onClick={() => handleDelete(active)}
                             className="lg:hidden hover:text-danger" />
+                <IconButton
+                  label="AI 助手"
+                  icon={<Sparkles size={16} />}
+                  onClick={() => setAiOpen(v => !v)}
+                  className={aiOpen ? 'text-accent' : ''}
+                />
                 <Button
                   size="sm"
                   variant={isDirty ? 'primary' : 'secondary'}
@@ -286,10 +414,27 @@ export function TemplatesView() {
             icon={<FileCode2 size={32} />}
             title="还没有模板"
             description="模板定义生成配置的骨架，订阅节点会按占位符注入其中。"
-            action={<Button variant="primary" onClick={handleCreate} icon={<Plus size={15} />}>新建模板</Button>}
+            action={
+              <div className="flex items-center gap-2">
+                <Button variant="primary" onClick={handleCreate} icon={<Plus size={15} />}>新建模板</Button>
+                <Button variant="secondary" onClick={() => fileInputRef.current?.click()}
+                        loading={uploading} icon={<Upload size={15} />}>上传 YAML</Button>
+              </div>
+            }
           />
         )}
       </section>
+
+      {/* AI 助手侧边栏。改写结果先写回编辑器，仍需用户保存才落库。 */}
+      {aiOpen && active && (
+        <aside className="hidden md:flex w-80 lg:w-96 shrink-0 flex-col border-l border-line bg-surface">
+          <AiPanel
+            template={{ name: active.name, content: active.content }}
+            onApply={(content) => patchActive({ content })}
+            onClose={() => setAiOpen(false)}
+          />
+        </aside>
+      )}
     </div>
   );
 }

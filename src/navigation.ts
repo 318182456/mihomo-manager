@@ -1,4 +1,4 @@
-import { LayoutDashboard, Rss, Globe, FileCode2, Link2, ShieldCheck } from 'lucide-react';
+import { LayoutDashboard, Rss, Globe, FileCode2, Link2, ShieldCheck, Sparkles } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
 export type ViewId =
@@ -7,6 +7,7 @@ export type ViewId =
   | 'subscriptions'
   | 'templates'
   | 'links'
+  | 'ai'
   | 'passkeys';
 
 export interface NavItem {
@@ -23,6 +24,7 @@ export const NAV_ITEMS: NavItem[] = [
   { id: 'subscriptions', label: '订阅组',      icon: Rss,             section: '配置' },
   { id: 'templates',     label: '模板',        icon: FileCode2,       section: '配置' },
   { id: 'links',         label: '订阅链接',    icon: Link2,           section: '分发' },
+  { id: 'ai',            label: 'AI 助手',     icon: Sparkles,        section: '系统' },
   { id: 'passkeys',      label: 'Passkey',    icon: ShieldCheck,     section: '系统' },
 ];
 

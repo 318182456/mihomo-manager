@@ -7,6 +7,7 @@ import {
   verifyAuthenticationResponse,
 } from '@simplewebauthn/server';
 import jsyaml from 'js-yaml';
+import * as ai from './ai';
 import type {
   RegistrationResponseJSON,
   AuthenticationResponseJSON,
@@ -25,7 +26,20 @@ export interface Env {
   UOUIN_KEY?: string;
   /** 需要传入加速的主机地址，可在 Cloudflare Secret / .dev.vars 中配置 */
   UOUIN_URL?: string;
+  /** mihomo external-controller 密钥，供模板 {{SECRET:CLASH_SECRET}} 引用 */
+  CLASH_SECRET?: string;
+  /** mixed-port 认证账号，逗号分隔的 user:pass，供模板 {{SECRET:CLASH_AUTH}} 引用 */
+  CLASH_AUTH?: string;
+  /** AI 拆分用的 OpenAI 兼容接口地址，如 https://host/v1 */
+  AI_BASE_URL?: string;
+  /** AI 接口密钥 */
+  AI_API_KEY?: string;
+  /** 默认模型名，未配置时回落到 gemini-2.5-flash-lite */
+  AI_MODEL?: string;
 }
+
+/** 允许模板通过 {{SECRET:名称}} 引用的 Env 键白名单，避免模板泄漏 ADMIN_PASSWORD 等敏感项 */
+const TEMPLATE_SECRET_KEYS = ['CLASH_SECRET', 'CLASH_AUTH'] as const;
 
 // ---------- 默认模板配置 ----------
 const DEFAULT_TEMPLATES = [
@@ -169,6 +183,12 @@ export interface UrlEntry {
   proxyGroup?: string;
   /** 分组图标文件名（不含扩展名），如 Auto、Speedtest，前缀固定为 Qure/IconSet/Color/ */
   icon?: string;
+  /**
+   * 该订阅源的节点本身走 Cloudflare。置 true 后会被
+   * {{PROVIDERS_NOCF}} 与 {{URL_GROUP_PROVIDERS_NOCF:xxx}} 排除，
+   * 避免用 CF 节点去代理 Cloudflare 自家流量（绕一圈反而更慢）。
+   */
+  isCloudflare?: boolean;
   /** 自动获取最新URL的接口地址 */
   refreshUrl?: string;
   /** 传给 refreshUrl 的请求头 */
@@ -823,6 +843,7 @@ async function handleAPI(request: Request, env: Env, pathname: string, ctx: Exec
         return handleUrls(request, env.KV, method, id);
 
       case 'templates':     return handleTemplates(request, env.ATTACHMENTS, method, id);
+      case 'ai':           return handleAI(request, env, method, id);
       case 'links':         return handleLinks(request, env.KV, method, id);
       case 'dashboard':     return handleDashboard(env);
       case 'gfw':
@@ -1212,6 +1233,142 @@ async function handleUrlEntryRefresh(groupId: string, urlIndex: number, kv: KVNa
   return handleUrlRefresh(urlId, kv);
 }
 
+// ---------- AI 助手 ----------
+
+/** 取 AI 配置；未配置 Secret 时返回 null，由调用方回 400 提示。 */
+function aiConfigOf(env: Env, modelOverride?: string): ai.AiConfig | null {
+  if (!env.AI_BASE_URL || !env.AI_API_KEY) return null;
+  return {
+    baseUrl: env.AI_BASE_URL,
+    apiKey: env.AI_API_KEY,
+    model: modelOverride || env.AI_MODEL || "gemini-2.5-flash-lite",
+  };
+}
+
+/**
+ * AI 助手接口。一律只返回建议，不写 R2/KV —— 落库走既有模板 API，由前端在
+ * 用户确认后发起。
+ */
+async function handleAI(req: Request, env: Env, method: string, action: string | null): Promise<Response> {
+  // 可用模型列表：透传上游 /models，供前端下拉选择
+  if (method === "GET" && action === "models") {
+    const cfg = aiConfigOf(env);
+    if (!cfg) return err("未配置 AI_BASE_URL / AI_API_KEY", 400);
+    try {
+      const r = await fetch(`${cfg.baseUrl.replace(/\/+$/, "")}/models`, {
+        headers: { Authorization: `Bearer ${cfg.apiKey}` },
+      });
+      if (!r.ok) return err(`上游返回 ${r.status}`, 502);
+      const j = await r.json() as any;
+      const ids: string[] = (j?.data ?? []).map((m: any) => String(m?.id ?? "")).filter(Boolean);
+      return ok({ models: ids, current: cfg.model });
+    } catch (e) {
+      return err(e instanceof Error ? e.message : String(e), 502);
+    }
+  }
+
+  if (method === "GET" && action === "status") {
+    const cfg = aiConfigOf(env);
+    return ok({ configured: !!cfg, model: cfg?.model ?? null });
+  }
+
+  if (method !== "POST") return err404();
+
+  const bodyJson = await req.json<any>().catch(() => ({}));
+  const cfg = aiConfigOf(env, bodyJson?.model);
+  if (!cfg) return err("未配置 AI_BASE_URL / AI_API_KEY，请用 wrangler secret put 设置", 400);
+
+  try {
+    // 拆分整份配置
+    if (action === "split") {
+      const raw = String(bodyJson?.content ?? "");
+      if (!raw.trim()) return err("content 为空", 400);
+      return ok(await ai.analyzeSplit(raw, cfg));
+    }
+
+    // 针对单个模板提问/改写
+    if (action === "edit") {
+      const name = String(bodyJson?.name ?? "");
+      const content = String(bodyJson?.content ?? "");
+      const instruction = String(bodyJson?.instruction ?? "");
+      if (!instruction.trim()) return err("instruction 为空", 400);
+      const history = Array.isArray(bodyJson?.history) ? bodyJson.history : [];
+      return ok(await ai.editTemplate(name, content, instruction, cfg, history));
+    }
+
+    // 全局问答：后端自行组装数据概览，避免前端把 token 等敏感值传上来
+    if (action === "ask") {
+      const question = String(bodyJson?.question ?? "");
+      if (!question.trim()) return err("question 为空", 400);
+      const overview = await buildOverview(env);
+      const history = Array.isArray(bodyJson?.history) ? bodyJson.history : [];
+      const r = await ai.askGlobal(overview, question, cfg, history);
+      return ok(r);
+    }
+  } catch (e) {
+    return err(e instanceof Error ? e.message : String(e), 502);
+  }
+
+  return err404();
+}
+
+/**
+ * 组装给 AI 的平台数据概览。只放结构信息：模板名与引用关系、订阅组与
+ * provider 名、链接绑定的模板。订阅 URL 与 token 一律不出现。
+ */
+async function buildOverview(env: Env): Promise<string> {
+  const tpls = await getOrSeedTemplates(env.ATTACHMENTS);
+  const lines: string[] = [];
+
+  lines.push("## 模板");
+  const byId = new Map(tpls.map(t => [t.id, t.name]));
+  // 同时给出「引用了谁」和「被谁引用」：只给前者的话，
+  // 问「哪些模板没被引用」会被误答成「哪些模板没有 INCLUDE」。
+  const outRefs = new Map<string, string[]>();
+  const inRefs = new Map<string, string[]>();
+  for (const t of tpls) {
+    const inc = [...t.content.matchAll(/\{\{INCLUDE:\s*([^}]+)\}\}/g)].map(m => m[1].trim());
+    outRefs.set(t.name, inc);
+    for (const target of inc) {
+      if (!inRefs.has(target)) inRefs.set(target, []);
+      inRefs.get(target)!.push(t.name);
+    }
+  }
+  // 被订阅链接直接绑定的模板算入口，不属于「没人用」
+  const linksRawForEntry = await env.KV.get("links");
+  const entryIds = new Set<string>(((linksRawForEntry ? JSON.parse(linksRawForEntry) : []) as any[]).map(l => l?.templateId));
+  for (const t of tpls) {
+    const out = outRefs.get(t.name) ?? [];
+    const incoming = inRefs.get(t.name) ?? [];
+    const isEntry = entryIds.has(t.id);
+    lines.push(
+      `- ${t.name} (${t.content.length} 字符)` +
+      ` | 引用了: ${out.length ? out.join(", ") : "无"}` +
+      ` | 被引用: ${incoming.length ? incoming.join(", ") : "无"}` +
+      ` | 入口模板: ${isEntry ? "是" : "否"}`,
+    );
+  }
+
+  // 订阅组存的是 urlIds，需要和全局订阅源表关联后才有 provider 名
+  const globalUrls = await getGlobalUrlsAndMigrate(env.KV);
+  const subRaw = await env.KV.get("subscriptions");
+  const groups: any[] = subRaw ? JSON.parse(subRaw) : [];
+  lines.push("", "## 订阅组");
+  for (const g of groups) {
+    const resolved = resolveSubscriptionGroup(g, globalUrls);
+    const names = resolved.urls.map(u => `${u.name ?? "(无名)"}${u.proxyGroup ? "@" + u.proxyGroup : ""}${u.isCloudflare ? "[CF]" : ""}`);
+    lines.push(`- ${g?.title ?? g?.id}: ${resolved.urls.length} 个源 ${names.join(", ")}`);
+  }
+
+  const linksRaw = await env.KV.get("links");
+  const links = linksRaw ? JSON.parse(linksRaw) : [];
+  lines.push("", "## 订阅链接");
+  for (const l of links) {
+    lines.push(`- ${l?.name}: 模板=${byId.get(l?.templateId) ?? l?.templateId}`);
+  }
+
+  return ai.redact(lines.join("\n"));
+}
 // ---------- 模板 CRUD (R2 对象存储) ----------
 
 async function handleTemplates(req: Request, r2: R2Bucket, method: string, id: string|null): Promise<Response> {
@@ -2651,6 +2808,30 @@ async function renderTemplate(template: string, group: SubscriptionGroup, filter
       .replace(/\{\{PROVIDERS\}\}/g, providerLines);
   }
 
+  // {{PROVIDERS_NOCF}} → 同 {{PROVIDERS}}，但排除标记为 Cloudflare 的订阅源。
+  // 用于 CloudflareCDN 分组：用 CF 节点代理 CF 自家流量会多绕一圈。
+  if (output.includes('# {{PROVIDERS_NOCF}}') || output.includes('{{PROVIDERS_NOCF}}')) {
+    const lines = group.urls
+      .map((entry, i) => ({ entry, i }))
+      .filter(({ entry }) => !entry.isCloudflare)
+      .map(({ entry, i }) => {
+        const name = entry.name ?? `p${i + 1}`;
+        const providerUrl = subUrlBase ? `${subUrlBase}?provider=${encodeURIComponent(name)}${providerParams}` : entry.url;
+        const l = [
+          `  ${name}:`,
+          `    url: "${providerUrl}"`,
+          `    path: "./providers/${name}.yaml"`,
+          `    <<: *p`,
+        ];
+        if (proxyUpdateInterval && proxyUpdateInterval > 0) l.push(`    interval: ${proxyUpdateInterval}`);
+        return l.join('\n');
+      }).join('\n');
+
+    output = output
+      .replace(/^\s*#\s*\{\{PROVIDERS_NOCF\}\}\s*$/m, lines)
+      .replace(/\{\{PROVIDERS_NOCF\}\}/g, lines);
+  }
+
   // 4. {{PROXIES}} → 过滤后的代理节点内联 YAML 块
   if (output.includes('{{PROXIES}}') || output.includes('# {{PROXIES}}')) {
     const proxyYaml = filteredProxies.length > 0
@@ -2693,6 +2874,8 @@ async function renderTemplate(template: string, group: SubscriptionGroup, filter
         `    tolerance: 50`,
         `    url: https://www.gstatic.com/generate_204`,
         `    interval: 300`,
+        // 5s 超时：2s 对跨境节点过短，网络抖动时会误判失效导致频繁切换
+        `    timeout: 5000`,
       ].join('\n') + iconLine;
     }).join('\n\n');
     // 替换时显式补 \n，避免 CRLF 文件的 \r 被 \s*$ 消耗导致空行丢失
@@ -2710,6 +2893,23 @@ async function renderTemplate(template: string, group: SubscriptionGroup, filter
   //     use:
   //       - XS
   //       - 三毛
+  // {{URL_GROUP_PROVIDERS_NOCF:分组名}} → 该分组下非 Cloudflare 的 provider。
+  // 必须先于下方通用版替换：通用版的 [^}]+ 会误吃 _NOCF 后缀。
+  output = output.replace(/^(\s*)\{\{URL_GROUP_PROVIDERS_NOCF:([^}]+)\}\}/gm, (match, indent, pgName) => {
+    const trimmed = pgName.trim();
+    const providers = group.urls
+      .filter(e => e.name && !e.isCloudflare && (e.proxyGroup || 'other') === trimmed)
+      .map(e => e.name!);
+    if (providers.length === 0) return `${indent}[]`;
+    return providers.map(p => `${indent}- ${p}`).join('\n');
+  });
+  output = output.replace(/\{\{URL_GROUP_PROVIDERS_NOCF:([^}]+)\}\}/g, (match, pgName) => {
+    const trimmed = pgName.trim();
+    return group.urls
+      .filter(e => e.name && !e.isCloudflare && (e.proxyGroup || 'other') === trimmed)
+      .map(e => e.name!).join(', ');
+  });
+
   output = output.replace(/^(\s*)\{\{URL_GROUP_PROVIDERS:([^}]+)\}\}/gm, (match, indent, pgName) => {
     const trimmedPgName = pgName.trim();
     const providers = group.urls
@@ -2727,6 +2927,15 @@ async function renderTemplate(template: string, group: SubscriptionGroup, filter
       .map(e => e.name!);
     return providers.join(', ');
   });
+
+  // {{URL_GROUP_NAMES_NOCF}} → 同下，但排除整组都是 Cloudflare 的分组
+  if (output.includes('{{URL_GROUP_NAMES_NOCF}}')) {
+    const names = [...new Set(group.urls
+      .filter(e => e.name && !e.isCloudflare)
+      .map(e => e.proxyGroup || 'other')
+    )];
+    output = output.replace(/\{\{URL_GROUP_NAMES_NOCF\}\}/g, names.join(','));
+  }
 
   // {{URL_GROUP_NAMES}} → 所有 proxyGroup 名称（去重，保持顺序，包含 other）
   if (output.includes('{{URL_GROUP_NAMES}}')) {
@@ -2757,6 +2966,26 @@ async function renderTemplate(template: string, group: SubscriptionGroup, filter
     .replace(/\{\{GROUP_FILTER\}\}/g,  goFilter)
     .replace(/\{\{GROUP_EXCLUDE\}\}/g, goExclude)
     .replace(/\{\{GENERATED_AT\}\}/g,  new Date().toISOString());
+
+  // {{SECRET:名称}} → 从 Env 注入敏感值，使凭据不必明文存放在模板里。
+  // 仅允许白名单键；未配置的 secret 渲染为注释，避免把变量原文写进配置。
+  output = output.replace(/^([ \t]*)(\S+:\s*)?\{\{SECRET:([^}]+)\}\}[ \t]*$/gm, (match, indent, prefix, rawKey) => {
+    const key = rawKey.trim();
+    if (!(TEMPLATE_SECRET_KEYS as readonly string[]).includes(key)) {
+      return `${indent}# [ERROR: 模板不允许引用 secret '${key}']`;
+    }
+    const value = (env as unknown as Record<string, string | undefined>)[key];
+    if (!value) return `${indent}# [SECRET '${key}' 未配置]`;
+    // CLASH_AUTH 为逗号分隔的多个 user:pass，展开成 YAML 列表
+    if (key === 'CLASH_AUTH') {
+      const items = value.split(',').map(s => s.trim()).filter(Boolean);
+      if (items.length === 0) return `${indent}# [SECRET '${key}' 为空]`;
+      const listIndent = prefix ? `${indent} ` : indent;
+      const list = items.map(v => `${listIndent}- "${v}"`).join('\n');
+      return prefix ? `${indent}${prefix.trimEnd()}\n${list}` : list;
+    }
+    return `${indent}${prefix ?? ''}"${value}"`;
+  });
 
   // 5. {{DOWNLOAD: url [| path: path]}} 在线分流/规则同步
   const downloadLineRegex = /^([ \t]*)\{\{DOWNLOAD:\s*([^}|]+?)(?:\s*\|\s*path:\s*([^}]+?))?\}\}/gm;

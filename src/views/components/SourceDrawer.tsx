@@ -231,6 +231,12 @@ export function SourceDrawer({
                 placeholder="例如 台湾"
               />
               <Checkbox
+                checked={draft.isCloudflare ?? false}
+                onChange={(v) => commit({ isCloudflare: v || undefined })}
+                label="该源的节点走 Cloudflare"
+                description="勾选后会被模板的 {{PROVIDERS_NOCF}} 与 {{URL_GROUP_PROVIDERS_NOCF:xxx}} 排除，避免用 CF 节点代理 Cloudflare 自家流量。"
+              />
+              <Checkbox
                 checked={draft.simplifyNames ?? false}
                 onChange={(v) => commit({ simplifyNames: v })}
                 label="简化节点名称"
