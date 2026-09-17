@@ -1,0 +1,19 @@
+# 本地 `wrangler dev` 用的环境变量示例。复制为 .dev.vars 后填入真实值；
+# .dev.vars 已被 .gitignore 忽略，不会进仓库。生产环境请用 `wrangler secret put <名称>`。
+
+# 管理后台密码。未设置时 worker 回落到默认值 admin888
+ADMIN_PASSWORD=change-me
+
+# 模板通过 {{SECRET:CLASH_AUTH}} / {{SECRET:CLASH_SECRET}} 引用（docker 模板在用）。
+# 本地未设置时这两处会渲染成 "# [SECRET 'xxx' 未配置]" 注释，拉出来的 docker 配置无法启动。
+# CLASH_AUTH 为逗号分隔的多组 user:pass，worker 会展开成 YAML 列表
+CLASH_AUTH=user1:pass1,user2:pass2
+CLASH_SECRET=change-me
+
+# AI 助手接口密钥（接口地址与模型名在 wrangler.toml [vars] 里）
+AI_API_KEY=
+
+# uouin 优选 IP 接口（不用可留空）
+UOUIN_USERNAME=
+UOUIN_KEY=
+UOUIN_URL=
