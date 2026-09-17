@@ -344,3 +344,75 @@ export const aiAsk = (question: string, model?: string, history: AiChatTurn[] = 
     method: "POST",
     body: JSON.stringify({ question, model, history }),
   });
+
+// ---------- WARP / MASQUE 注册 ----------
+
+export interface WarpEnrollResult {
+  deviceId: string;
+  token: string;
+  ipv4: string;
+  ipv6: string;
+  peer: {
+    publicKey: string;
+    endpointV4: string;
+    endpointV6: string;
+    /** 上游建议的入口域名，形如 engage.cloudflareclient.com:2408 */
+    endpointHost: string;
+    /** 上游开放的端口列表 */
+    ports: number[];
+  };
+  license: string | null;
+  accountType: string | null;
+}
+
+/**
+ * 用本地生成的公钥注册一个 MASQUE 设备。
+ * 私钥不参与请求，只留在浏览器内存里。
+ */
+export const registerWarp = (publicKey: string, name: string, privateKey?: string) =>
+  apiFetch<WarpEnrollResult & { saved: boolean }>('/api/warp/register', {
+    method: 'POST',
+    body: JSON.stringify({ publicKey, name, privateKey }),
+  });
+
+/** 已注册设备（列表视图不含 token 与私钥） */
+export interface WarpDevice {
+  id: string;
+  name: string;
+  deviceId: string;
+  ipv4: string;
+  ipv6: string;
+  peerPublicKey: string;
+  endpointV4: string;
+  endpointV6: string;
+  ports: number[];
+  accountType: string | null;
+  createdAt: string;
+  /** 是否留存了私钥，决定能否重新生成节点 */
+  hasPrivateKey: boolean;
+}
+
+/** 重新生成节点所需的凭据，单独取用 */
+export interface WarpCredentials {
+  privateKey: string;
+  peerPublicKey: string;
+  ipv4: string;
+  ipv6: string;
+  endpointV4: string;
+  endpointV6: string;
+  ports: number[];
+}
+
+export const getWarpDevices = () => apiFetch<WarpDevice[]>('/api/warp/devices');
+
+export const getWarpCredentials = (id: string) =>
+  apiFetch<WarpCredentials>(`/api/warp/devices/${id}/credentials`);
+
+export const renameWarpDevice = (id: string, name: string) =>
+  apiFetch<WarpDevice>(`/api/warp/devices/${id}`, {
+    method: 'PUT', body: JSON.stringify({ name }),
+  });
+
+export const deleteWarpDevice = (id: string) =>
+  apiFetch<{ ok: boolean; upstream: boolean; detail: string }>(
+    `/api/warp/devices/${id}`, { method: 'DELETE' });

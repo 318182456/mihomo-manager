@@ -11,6 +11,7 @@ import { DashboardView } from './views/DashboardView';
 import { SourcesView } from './views/SourcesView';
 import { SubscriptionsView } from './views/SubscriptionsView';
 import { TemplatesView } from './views/TemplatesView';
+import { WarpView } from './views/WarpView';
 import { LinksView } from './views/LinksView';
 import { PasskeysView } from './views/PasskeysView';
 import { AiView } from './views/AiView';
@@ -91,6 +92,7 @@ function Shell({ onLogout }: { onLogout: () => void }) {
       case 'sources':       return <SourcesView />;
       case 'subscriptions': return <SubscriptionsView />;
       case 'templates':     return <TemplatesView />;
+      case 'warp':          return <WarpView />;
       case 'links':         return <LinksView />;
       case 'ai':            return <AiView />;
       case 'passkeys':      return <PasskeysView />;

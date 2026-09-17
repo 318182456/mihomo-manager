@@ -8,6 +8,10 @@ import {
 } from '@simplewebauthn/server';
 import jsyaml from 'js-yaml';
 import * as ai from './ai';
+import {
+  handleWarpRegister, handleWarpDeviceList, handleWarpDeviceCredentials,
+  handleWarpDeviceRename, handleWarpDeviceDelete,
+} from './warp';
 import type {
   RegistrationResponseJSON,
   AuthenticationResponseJSON,
@@ -841,6 +845,25 @@ async function handleAPI(request: Request, env: Env, pathname: string, ctx: Exec
           return handleUrlProxies(id, env.KV);
         }
         return handleUrls(request, env.KV, method, id);
+
+      case 'warp': {
+        if (id === 'register') return handleWarpRegister(request, env.KV, ok, err);
+        if (id === 'devices') {
+          // /api/warp/devices/:deviceKey[/credentials]
+          const deviceKey = parts[2] ?? null;
+          if (!deviceKey) {
+            if (method === 'GET') return handleWarpDeviceList(env.KV, ok);
+            return err('Method Not Allowed', 405);
+          }
+          if (parts[3] === 'credentials' && method === 'GET') {
+            return handleWarpDeviceCredentials(deviceKey, env.KV, ok, err);
+          }
+          if (method === 'PUT')    return handleWarpDeviceRename(deviceKey, request, env.KV, ok, err);
+          if (method === 'DELETE') return handleWarpDeviceDelete(deviceKey, env.KV, ok, err);
+          return err('Method Not Allowed', 405);
+        }
+        return err404();
+      }
 
       case 'templates':     return handleTemplates(request, env.ATTACHMENTS, method, id);
       case 'ai':           return handleAI(request, env, method, id);
