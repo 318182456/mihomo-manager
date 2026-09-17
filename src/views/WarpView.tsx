@@ -2,9 +2,10 @@ import { useEffect, useMemo, useState } from 'react';
 import { KeyRound, Save, ShieldAlert, Cloud, Trash2, Pencil, RefreshCw } from 'lucide-react';
 import * as api from '../api';
 import {
-  ENDPOINT_MODES, PORT_PRESETS, buildWarpProxies, generateKeys, nodeCount,
+  CONGESTION_CONTROLLERS, DEFAULT_MTU, ENDPOINT_MODES, PORT_PRESETS,
+  buildWarpProxies, generateKeys, nodeCount,
   parseExtraEndpoints, resolveEndpoints,
-  type EndpointMode, type MasqueKeys,
+  type CongestionController, type EndpointMode, type MasqueKeys,
 } from '../lib/warp';
 import { Page, PageHeader, Section, Badge, EmptyState, LoadingState } from '../ui/Layout';
 import { Button, IconButton } from '../ui/Button';
@@ -24,7 +25,8 @@ export function WarpView() {
   const [mode, setMode] = useState<EndpointMode>('auto-v4');
   const [extra, setExtra] = useState('');
   const [sni, setSni] = useState('www.microsoft.com');
-  const [mtu, setMtu] = useState(1280);
+  const [mtu, setMtu] = useState(DEFAULT_MTU);
+  const [cc, setCc] = useState<CongestionController>('cubic');
 
   const [busy, setBusy] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -81,8 +83,8 @@ export function WarpView() {
 
   const yaml = useMemo(() => {
     if (!keys || !result) return '';
-    return buildWarpProxies({ keys, result, endpoints: hosts, ports, sni, mtu });
-  }, [keys, result, hosts, ports, sni, mtu]);
+    return buildWarpProxies({ keys, result, endpoints: hosts, ports, sni, mtu, congestionController: cc });
+  }, [keys, result, hosts, ports, sni, mtu, cc]);
 
   // 注册返回后自动切到上游端口，省去手动选择
   useEffect(() => {
@@ -298,8 +300,19 @@ export function WarpView() {
             <TextInput label="SNI" value={sni} onChange={e => setSni(e.target.value)} />
             <TextInput
               label="MTU" type="number" value={mtu}
-              onChange={e => setMtu(Number(e.target.value) || 1280)}
+              hint="保持 1280（mihomo 默认）。实测调到 1380 会让全部节点超时。"
+              onChange={e => setMtu(Number(e.target.value) || DEFAULT_MTU)}
             />
+            <Select
+              label="拥塞控制"
+              value={cc}
+              hint={CONGESTION_CONTROLLERS.find(c => c.value === cc)?.hint}
+              onChange={e => setCc(e.target.value as CongestionController)}
+            >
+              {CONGESTION_CONTROLLERS.map(c => (
+                <option key={c.value} value={c.value}>{c.label}</option>
+              ))}
+            </Select>
           </div>
         </Section>
       </div>

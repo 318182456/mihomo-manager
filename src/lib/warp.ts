@@ -8,9 +8,12 @@
 /**
  * 入口候选池。这些地址均有 usque-custom-pro 的实现佐证，
  * 但仍属"候选"性质 —— 真正权威的入口以注册响应里的 endpoint 为准。
+ *
+ * 曾经收录过 162.159.198.1，但 warp-egress 实测其 7 个端口全部建连失败
+ * （mihomo delay 恒为 0），故移除。"有实现佐证"不等于"MASQUE 可用"，
+ * 往这里加地址前请先用 src/scripts/warp-egress.mjs 实测。
  */
 export const ENDPOINTS: { label: string; host: string; kind: 'v4' | 'v6' }[] = [
-  { label: '162.159.198.1', host: '162.159.198.1', kind: 'v4' },
   { label: '162.159.198.2', host: '162.159.198.2', kind: 'v4' },
   { label: '162.159.199.2', host: '162.159.199.2', kind: 'v4' },
   { label: '2606:4700:103::1', host: '[2606:4700:103::1]', kind: 'v6' },
@@ -83,6 +86,35 @@ export const PORT_PRESETS: Record<string, number[]> = {
   all: [443, 500, 1701, 4500, 4443, 8095, 8443],
   minimal: [500, 4500],
 };
+
+/**
+ * ip-stack.congestion-controller：MASQUE 隧道内 TCP 栈的拥塞控制算法。
+ *
+ * 注意这与 masque 节点顶层的同名字段不是一回事 —— 顶层那个管外层 QUIC，
+ * 取值为 cubic/new_reno/bbr；这里管隧道内 TCP，取值为 cubic/reno/bbr/bbr3。
+ * 两组值不通用，把 new_reno 写进 ip-stack 是无效配置。
+ *
+ * 另有一个限制：该选项仅对 mihomo 自研的 MIPS 栈生效，
+ * ip-stack.mode 落到 gvisor 时填什么都不起作用。
+ * 取值来源：https://wiki.metacubex.one/config/proxies/masque/
+ */
+export type CongestionController = 'cubic' | 'reno' | 'bbr' | 'bbr3';
+
+export const CONGESTION_CONTROLLERS: { value: CongestionController; label: string; hint: string }[] = [
+  { value: 'cubic', label: 'CUBIC（默认）', hint: 'mihomo 默认算法，丢包即降窗。不确定时用这个。' },
+  { value: 'bbr',   label: 'BBR',           hint: '基于带宽探测。跨境高丢包链路上可能优于 CUBIC，但需实测确认。' },
+  { value: 'bbr3',  label: 'BBR3',          hint: 'BBRv3 模型的实现，保留 STARTUP/DRAIN/PROBE_BW/PROBE_RTT 各阶段。' },
+  { value: 'reno',  label: 'Reno',          hint: '最保守，仅在前几种异常时作为兜底。' },
+];
+
+/**
+ * 默认 MTU。与 mihomo 的 masque 默认值保持一致。
+ *
+ * 曾试过 1380 想抬高每包净荷，结果所有节点 URLTest 全部超时 —— 典型的
+ * 大包被静默丢弃。官方文档与全部示例均为 1280，也未给出合法上限，
+ * 故回到 1280。要调大需自行实测大流量不卡死，别只看握手是否通。
+ */
+export const DEFAULT_MTU = 1280;
 
 export interface MasqueKeys {
   /** SEC1 DER 私钥，Base64 */
@@ -174,6 +206,8 @@ export interface BuildOptions {
   ports: number[];
   sni: string;
   mtu: number;
+  /** 隧道内 TCP 拥塞控制算法，省略时用 cubic */
+  congestionController?: CongestionController;
 }
 
 /**
@@ -189,6 +223,7 @@ export function buildWarpProxies(o: BuildOptions): string {
     `# 由 WARP 注册页于 ${new Date().toISOString()} 自动生成，手工改动会在下次注册时被覆盖。`,
   ];
 
+  const cc = o.congestionController ?? 'cubic';
   const pub = pemBody(o.result.peer.publicKey);
   const priv = o.keys.privateKey;
   const ip = o.result.ipv4 ? `${o.result.ipv4}/32` : '';
@@ -214,7 +249,7 @@ export function buildWarpProxies(o: BuildOptions): string {
         `    sni: "${o.sni}"`,
         '    ip-stack:',
         '      mode: auto',
-        '      congestion-controller: cubic',
+        `      congestion-controller: ${cc}`,
         '    remote-dns-resolve: true',
         '    dns:',
         '      - "1.1.1.1"',
