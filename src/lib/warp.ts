@@ -24,8 +24,8 @@ export type EndpointMode = 'source-auto' | 'auto-v4' | 'auto-v6' | 'auto-curated
 
 export const ENDPOINT_MODES: { value: EndpointMode; label: string; hint: string }[] = [
   { value: 'source-auto',  label: '仅注册响应',   hint: '只用 Cloudflare 本次返回的入口，最稳妥但节点数最少。' },
-  { value: 'auto-curated', label: '推荐组合',     hint: '注册响应 + IPv4/IPv6 候选，兼顾可用性与节点数量。' },
-  { value: 'auto-v4',      label: '注册响应+IPv4', hint: '适合无 IPv6 出口的网络。' },
+  { value: 'auto-v4',      label: '仅 IPv4（推荐）', hint: '注册响应 + IPv4 候选。入口模板多为 ipv6: false，IPv6 节点会全部超时。' },
+  { value: 'auto-curated', label: '含 IPv6 候选',   hint: '注册响应 + IPv4/IPv6 候选。仅在本机确有 IPv6 出口时才有意义。' },
   { value: 'auto-v6',      label: '注册响应+IPv6', hint: '仅在本机有 IPv6 出口时可用。' },
   { value: 'custom',       label: '完全自定义',   hint: '只用下方手工填写的地址。' },
 ];

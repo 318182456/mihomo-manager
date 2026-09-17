@@ -19,7 +19,9 @@ export function WarpView() {
   const [templates, setTemplates] = useState<api.Template[]>([]);
   const [deviceName, setDeviceName] = useState('mihomo-manager');
   const [preset, setPreset] = useState<string>('recommended');
-  const [mode, setMode] = useState<EndpointMode>('auto-curated');
+  // 默认只用 IPv4：入口模板普遍 ipv6: false，带上 IPv6 候选只会生成一批必然超时的节点。
+  // 设备确有 IPv6 出口时，在界面上改选「推荐组合」或「注册响应+IPv6」即可。
+  const [mode, setMode] = useState<EndpointMode>('auto-v4');
   const [extra, setExtra] = useState('');
   const [sni, setSni] = useState('www.microsoft.com');
   const [mtu, setMtu] = useState(1280);
