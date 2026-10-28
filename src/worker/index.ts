@@ -1350,7 +1350,9 @@ async function buildOverview(env: Env): Promise<string> {
   const outRefs = new Map<string, string[]>();
   const inRefs = new Map<string, string[]>();
   for (const t of tpls) {
-    const inc = [...t.content.matchAll(/\{\{INCLUDE:\s*([^}]+)\}\}/g)].map(m => m[1].trim());
+    // 整行注释中的 INCLUDE 已禁用，不计入模板依赖。
+    const inc = [...t.content.matchAll(/^[ \t]*#[^\r\n]*|\{\{INCLUDE:\s*([^}]+)\}\}/gm)]
+      .flatMap(m => m[1] === undefined ? [] : [m[1].trim()]);
     outRefs.set(t.name, inc);
     for (const target of inc) {
       if (!inRefs.has(target)) inRefs.set(target, []);
@@ -2769,6 +2771,7 @@ async function handleSubFetch(pathname: string, env: Env, request: Request, ctx:
  * 
  * 4. 包含其他模板：
  *    {{INCLUDE: 模板名称}} → 会被替换为对应的子模板内容
+ *    # {{INCLUDE: 模板名称}} → 注释行保持原样，不展开
  */
 async function renderTemplate(template: string, group: SubscriptionGroup, filteredProxies: any[], env: Env, requestUrl?: string, proxyUpdateInterval?: number): Promise<string> {
   let output = template;
@@ -2786,7 +2789,9 @@ async function renderTemplate(template: string, group: SubscriptionGroup, filter
   let maxDepth = 5;
   do {
     prevOutput = output;
-    output = output.replace(/\{\{INCLUDE:\s*([^}]+)\}\}/g, (match, name) => {
+    // 先匹配并保留整行注释，避免 # 只注释掉子模板第一行、其余内容仍生效。
+    output = output.replace(/^[ \t]*#[^\r\n]*|\{\{INCLUDE:\s*([^}]+)\}\}/gm, (match, name) => {
+      if (name === undefined) return match;
       const tplName = name.trim();
       return templatesMap.get(tplName) ?? `# [ERROR: 找不到模板 '${tplName}']`;
     });
